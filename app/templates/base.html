@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Adotaê: um projeto acadêmico que aproxima pessoas da ideia de adoção responsável de animais.">
+    <title>{% block title %}Adotaê — Um novo começo{% endblock %}</title>
+    <link rel="icon" href="{{ url_for('static', filename='images/pata.svg') }}" type="image/svg+xml">
+    <link rel="preload" href="{{ url_for('static', filename='fonts/inter-latin-variable.woff2') }}" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="{{ url_for('static', filename='fonts/merriweather-latin-400.woff2') }}" as="font" type="font/woff2" crossorigin>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <script src="{{ url_for('static', filename='js/main.js') }}" defer></script>
+</head>
+<body>
+    <a class="skip-link" href="#conteudo">Pular para o conteúdo</a>
+    <header class="site-header">
+        <div class="container header-inner">
+            <a class="brand" href="{{ url_for('inicio') }}" aria-label="Adotaê, página inicial">
+                <svg class="brand-mark" viewBox="-1 -1 50 50" aria-hidden="true"><circle cx="24" cy="24" r="24" fill="currentColor"/><g fill="#FAF4EC" transform="translate(0 0.7)"><ellipse cx="11" cy="21" rx="3.5" ry="4.5" transform="rotate(-30 11 21)"/><ellipse cx="19" cy="13" rx="3.5" ry="5" transform="rotate(-12 19 13)"/><ellipse cx="29" cy="13" rx="3.5" ry="5" transform="rotate(12 29 13)"/><ellipse cx="37" cy="21" rx="3.5" ry="4.5" transform="rotate(30 37 21)"/><path d="M12 34c0-5 8-13 12-13s12 8 12 13c0 8-9 3-12 3s-12 5-12-3Z"/></g></svg>
+                <span>Adotaê</span>
+            </a>
+            <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="navegacao" hidden>Menu</button>
+            <nav id="navegacao" class="site-nav" aria-label="Navegação principal">
+                <a href="{{ url_for('inicio') }}" {% if request.endpoint == 'inicio' %}aria-current="page"{% endif %}>Início</a>
+                <a href="{{ url_for('animais') }}" {% if request.endpoint == 'animais' %}aria-current="page"{% endif %}>Animais</a>
+                <a class="nav-about" href="{{ url_for('inicio') }}#sobre">Sobre o projeto</a>
+            </nav>
+        </div>
+    </header>
+    <main id="conteudo" tabindex="-1">{% block content %}{% endblock %}</main>
+    <footer class="site-footer">
+        <div class="container footer-inner">
+            <span class="footer-name">Adotaê</span>
+            <p>Um projeto acadêmico feito para aproximar vidas.</p>
+            <span class="footer-note">Adoção com afeto e responsabilidade.</span>
+        </div>
+    </footer>
+</body>
+</html>
