@@ -1,12 +1,97 @@
 """Aplicação demonstrativa do projeto acadêmico Adotaê."""
 
+import os
+from pathlib import Path
+from typing import cast
+
+from dotenv import load_dotenv
 from flask import Flask, abort, render_template, request
+from flask_wtf.csrf import CSRFError, CSRFProtect
+from httpx import HTTPError
+from supabase import AuthApiError, AuthError, ClientOptions, SupabaseException, create_client
+from supabase_auth.types import SignUpWithEmailAndPasswordCredentials
+
+from app.forms import CadastroForm
+
+load_dotenv(Path(__file__).with_name(".env"))
 
 app = Flask(
     __name__,
     template_folder="app/templates",
     static_folder="app/static",
 )
+app.config.update(
+    SECRET_KEY=os.getenv("SECRET_KEY"),
+    SUPABASE_URL=os.getenv("SUPABASE_URL", ""),
+    SUPABASE_PUBLISHABLE_KEY=os.getenv("SUPABASE_PUBLISHABLE_KEY", ""),
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+)
+
+
+@app.before_request
+def verificar_configuracao_csrf():
+    if request.endpoint == "cadastro" and not app.secret_key:
+        return render_template("cadastro.html", indisponivel=True,
+                               mensagem="Cadastro indisponível no momento. Tente novamente mais tarde."), 503
+
+
+CSRFProtect(app)
+
+
+@app.errorhandler(CSRFError)
+def erro_csrf(error):
+    return render_template("cadastro.html", form=CadastroForm(formdata=None),
+                           mensagem="Não foi possível validar o formulário. Recarregue a página e tente novamente."), 400
+
+
+@app.after_request
+def impedir_cache_cadastro(response):
+    if request.endpoint == "cadastro":
+        response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.route("/cadastro", methods=["GET", "POST"])
+def cadastro():
+    form = CadastroForm()
+    if request.method == "GET":
+        return render_template("cadastro.html", form=form)
+    if not form.validate_on_submit():
+        return render_template("cadastro.html", form=form), 400
+
+    confirmacao = ("Se o cadastro foi realizado, você receberá um e-mail com um link de "
+                   "confirmação. Confira sua caixa de entrada e também a pasta de spam.")
+    indisponivel = "Cadastro indisponível no momento. Tente novamente mais tarde."
+    if not app.config["SUPABASE_URL"] or not app.config["SUPABASE_PUBLISHABLE_KEY"]:
+        return render_template("cadastro.html", form=form, mensagem=indisponivel), 503
+    try:
+        # Nunca reutilizar este cliente: o SDK pode guardar estado de autenticação.
+        supabase = create_client(
+            app.config["SUPABASE_URL"], app.config["SUPABASE_PUBLISHABLE_KEY"],
+            options=ClientOptions(persist_session=False, auto_refresh_token=False),
+        )
+        # A validação acima garante strings, mas não estreita os tipos do WTForms.
+        credenciais: SignUpWithEmailAndPasswordCredentials = {
+            "email": cast(str, form.email.data),
+            "password": cast(str, form.senha.data),
+            "options": {"data": {"nome": cast(str, form.nome.data)}},
+        }
+        supabase.auth.sign_up(credenciais)
+    except AuthApiError as error:
+        if error.code in ("user_already_exists", "email_exists"):
+            return render_template("cadastro.html", confirmacao=confirmacao)
+        if error.status == 429:
+            return render_template("cadastro.html", form=form,
+                                   mensagem="Muitas tentativas de cadastro. Aguarde alguns minutos e tente novamente."), 429
+        if error.code == "weak_password":
+            return render_template("cadastro.html", form=form,
+                                   mensagem="Escolha uma senha mais forte, com pelo menos 8 caracteres."), 400
+        return render_template("cadastro.html", form=form, mensagem=indisponivel), 503
+    except (AuthError, HTTPError, SupabaseException, ValueError):
+        return render_template("cadastro.html", form=form, mensagem=indisponivel), 503
+    # Não guardar nem retornar usuário, sessão ou tokens recebidos do provedor.
+    return render_template("cadastro.html", confirmacao=confirmacao)
 
 # Dados temporários para apresentar a interface. Não representam animais reais.
 ANIMAIS = [
@@ -102,4 +187,4 @@ def animal_detalhes(id):
 
 
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run()

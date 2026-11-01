@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Verifique seu e-mail' if confirmacao else 'Criar conta' }} — Adotaê{% endblock %}
+{% block content %}
+<section class="container registration" aria-labelledby="cadastro-titulo">
+    <div class="registration-card">
+        <p class="section-label">Faça parte do Adotaê</p>
+        <h1 id="cadastro-titulo">{{ 'Verifique seu e-mail' if confirmacao else 'Criar conta' }}</h1>
+        {% if confirmacao %}
+        <p class="registration-message" role="status">{{ confirmacao }}</p>
+        <a class="text-link" href="{{ url_for('inicio') }}">Voltar ao início</a>
+        {% else %}
+        <p>Preencha seus dados para criar sua conta. Será necessário confirmar seu e-mail.</p>
+        {% if mensagem %}<p class="registration-message" role="alert">{{ mensagem }}</p>{% endif %}
+        {% if not indisponivel %}
+        <form method="post" action="{{ url_for('cadastro') }}">
+            {{ form.csrf_token }}
+            {% for field in (form.nome, form.email, form.senha) %}
+            <div class="registration-field">
+                {{ field.label }}
+                {% if field.name == 'senha' %}
+                {{ field(required=true, minlength=8, autocomplete='new-password', aria_describedby='senha-ajuda' ~ (' senha-erro' if field.errors else ''), aria_invalid='true' if field.errors else 'false') }}
+                <small id="senha-ajuda">Use pelo menos 8 caracteres.</small>
+                {% else %}
+                {{ field(required=true, maxlength=100 if field.name == 'nome' else 254, autocomplete='name' if field.name == 'nome' else 'email', aria_describedby=field.name ~ '-erro' if field.errors else false, aria_invalid='true' if field.errors else 'false') }}
+                {% endif %}
+                {% if field.errors %}<p id="{{ field.name }}-erro" class="field-error" role="alert">{{ field.errors | join(' ') }}</p>{% endif %}
+            </div>
+            {% endfor %}
+            <button class="button" type="submit">Criar conta</button>
+        </form>
+        {% endif %}
+        {% endif %}
+    </div>
+</section>
+{% endblock %}

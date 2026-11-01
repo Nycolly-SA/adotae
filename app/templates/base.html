@@ -24,6 +24,7 @@
                 <a href="{{ url_for('inicio') }}" {% if request.endpoint == 'inicio' %}aria-current="page"{% endif %}>Início</a>
                 <a href="{{ url_for('animais') }}" {% if request.endpoint == 'animais' %}aria-current="page"{% endif %}>Animais</a>
                 <a class="nav-about" href="{{ url_for('inicio') }}#sobre">Sobre o projeto</a>
+                <a href="{{ url_for('cadastro') }}" {% if request.endpoint == 'cadastro' %}aria-current="page"{% endif %}>Criar conta</a>
             </nav>
         </div>
     </header>

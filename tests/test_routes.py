@@ -43,7 +43,9 @@ class PageParser(HTMLParser):
 
 class RouteTests(unittest.TestCase):
     def setUp(self):
-        app.config.update(TESTING=True)
+        original_config = app.config.copy()
+        self.addCleanup(app.config.update, original_config)
+        app.config.update(TESTING=True, SECRET_KEY="test-only-secret")
         self.client = app.test_client()
 
     def test_home_presents_project_and_catalog_link(self):
