@@ -1,7 +1,8 @@
 import unittest
 from html.parser import HTMLParser
+from unittest.mock import patch
 
-from run import app
+from run import ANIMAIS, app
 
 
 class PageParser(HTMLParser):
@@ -105,6 +106,76 @@ class RouteTests(unittest.TestCase):
                 self.assertEqual([option["value"] for option in page.selects[name]], values)
                 self.assertEqual([option["value"] for option in page.selects[name] if "selected" in option], [""])
 
+    def test_catalog_links_to_each_animal_even_after_filtering(self):
+        cases = (({}, [1, 2, 3, 4]), ({"tipo": "Gato"}, [2, 4]),
+                 ({"distrito": "Grussaí"}, [3]), ({"porte": "Grande"}, []))
+        for query, ids in cases:
+            with self.subTest(query=query):
+                html = self.client.get("/animais", query_string=query).get_data(as_text=True)
+                page = PageParser()
+                page.feed(html)
+                self.assertEqual([link for link in page.links if link.startswith("/animais/")],
+                                 [f"/animais/{animal_id}" for animal_id in ids])
+                self.assertEqual(html.count(">Ver detalhes</a>"), len(ids))
+
+    def test_details_present_each_animals_data_and_existing_image(self):
+        cases = (
+            (1, "Bento", "Cachorro", "Macho", "2 anos", "Médio", "São João da Barra (sede)",
+             "Companheiro de caminhadas e de tardes preguiçosas no sofá.", "bento.svg"),
+            (2, "Luna", "Gato", "Fêmea", "1 ano", "Pequeno", "Atafona",
+             "Curiosa, tranquila e especialista em encontrar um cantinho de sol.", "luna.svg"),
+            (3, "Paçoca", "Cachorro", "Macho", "6 meses", "Pequeno", "Grussaí",
+             "Um filhote cheio de energia, sempre pronto para uma brincadeira.", "pacoca.svg"),
+            (4, "Amora", "Gato", "Fêmea", "3 anos", "Pequeno", "Barcelos",
+             "Carinhosa e observadora. Gosta de companhia e de uma boa soneca.", "amora.svg"),
+        )
+        for animal_id, name, species, sex, age, size, district, description, image in cases:
+            with self.subTest(animal=name):
+                response = self.client.get(f"/animais/{animal_id}")
+                self.assertEqual(response.status_code, 200)
+                html = response.get_data(as_text=True)
+                self.assertIn(f"{name} — Adotaê</title>", html)
+                self.assertIn(f">{name}</h1>", html)
+                for label, value in (("Espécie", species), ("Sexo", sex), ("Idade", age),
+                                     ("Porte", size), ("Distrito", district)):
+                    self.assertIn(f"<dt>{label}</dt><dd>{value}</dd>", html)
+                self.assertIn(description, html)
+                page = PageParser()
+                page.feed(html)
+                self.assertEqual(page.heading_count, 1)
+                self.assertEqual(len(page.images), 1)
+                self.assertEqual(page.images[0]["src"], f"/static/images/{image}")
+                self.assertTrue(page.images[0].get("alt"))
+                self.assertIn("/animais", page.links)
+                self.assertIn("Voltar ao catálogo</a>", html)
+                self.assertIn("Pular para o conteúdo", html)
+
+    def test_detail_identifiers_do_not_depend_on_catalog_order(self):
+        with patch("run.ANIMAIS", list(reversed(ANIMAIS))):
+            for animal_id, name in ((1, "Bento"), (2, "Luna"), (3, "Paçoca"), (4, "Amora")):
+                with self.subTest(animal=name):
+                    response = self.client.get(f"/animais/{animal_id}")
+                    self.assertEqual(response.status_code, 200)
+                    self.assertIn(f">{name}</h1>", response.get_data(as_text=True))
+
+    def test_details_contact_is_demonstrative_without_contact_actions(self):
+        for animal_id in (1, 2, 3, 4):
+            with self.subTest(animal_id=animal_id):
+                html = self.client.get(f"/animais/{animal_id}").get_data(as_text=True)
+                self.assertIn("Contato demonstrativo", html)
+                self.assertIn("dados são fictícios", html)
+                self.assertIn("Não há contatos disponíveis nesta demonstração.", html)
+                page = PageParser()
+                page.feed(html)
+                self.assertEqual(page.forms, [])
+                self.assertFalse(any(link.startswith(("tel:", "mailto:", "http:", "https:"))
+                                     for link in page.links))
+
+    def test_unknown_animal_identifiers_return_404(self):
+        for animal_id in ("0", "5", "999", "-1", "inexistente", "1.5"):
+            with self.subTest(animal_id=animal_id):
+                self.assertEqual(self.client.get(f"/animais/{animal_id}").status_code, 404)
+
     def test_catalog_filters_by_type(self):
         for value, names in (("Cachorro", ("Bento", "Paçoca")), ("Gato", ("Luna", "Amora")),
                              ("Ave", ()), ("Pequeno mamífero", ()), ("Outro animal doméstico", ())):
@@ -155,10 +226,12 @@ class RouteTests(unittest.TestCase):
     def test_explicit_all_options_restore_full_catalog(self):
         self.assert_catalog({"tipo": "", "porte": "", "distrito": ""}, ("Bento", "Luna", "Paçoca", "Amora"))
 
-    def test_navigation_links_resolve_on_both_pages(self):
-        for path in ("/", "/animais"):
+    def test_navigation_links_resolve_on_all_pages(self):
+        for path in ("/", "/animais", "/animais/1", "/animais/2", "/animais/3", "/animais/4"):
+            response = self.client.get(path)
+            self.assertEqual(response.status_code, 200)
             page = PageParser()
-            page.feed(self.client.get(path).get_data(as_text=True))
+            page.feed(response.get_data(as_text=True))
             for href in page.links:
                 if href.startswith("/"):
                     with self.subTest(page=path, link=href):

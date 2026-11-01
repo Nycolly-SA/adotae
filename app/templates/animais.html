@@ -31,19 +31,20 @@
     {% if animais %}
     <div class="animal-grid">
         {% for animal in animais %}
-        <article class="animal-card" aria-labelledby="animal-{{ loop.index }}">
+        <article class="animal-card" aria-labelledby="animal-{{ animal.id }}">
             <div class="card-image">
                 <img src="{{ url_for('static', filename='images/' ~ animal.imagem) }}" alt="{{ animal.imagem_alt }}" width="480" height="400" loading="lazy">
                 <span class="species-tag">{{ animal.especie }}</span>
             </div>
             <div class="card-body">
-                <h2 id="animal-{{ loop.index }}">{{ animal.nome }}</h2>
+                <h2 id="animal-{{ animal.id }}">{{ animal.nome }}</h2>
                 <dl class="animal-facts">
                     <div><dt>Idade</dt><dd>{{ animal.idade }}</dd></div>
                     <div><dt>Porte</dt><dd>{{ animal.porte }}</dd></div>
                     <div><dt>Sexo</dt><dd>{{ animal.sexo }}</dd></div>
                 </dl>
                 <p>{{ animal.descricao }}</p>
+                <a class="text-link" href="{{ url_for('animal_detalhes', id=animal.id) }}" aria-label="Ver detalhes de {{ animal.nome }}">Ver detalhes</a>
             </div>
         </article>
         {% endfor %}

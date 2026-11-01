@@ -1,6 +1,6 @@
 """Aplicação demonstrativa do projeto acadêmico Adotaê."""
 
-from flask import Flask, render_template, request
+from flask import Flask, abort, render_template, request
 
 app = Flask(
     __name__,
@@ -11,6 +11,7 @@ app = Flask(
 # Dados temporários para apresentar a interface. Não representam animais reais.
 ANIMAIS = [
     {
+        "id": 1,
         "nome": "Bento",
         "distrito": "São João da Barra (sede)",
         "especie": "Cachorro",
@@ -22,6 +23,7 @@ ANIMAIS = [
         "imagem_alt": "Ilustração de Bento, um cachorro caramelo de orelhas caídas.",
     },
     {
+        "id": 2,
         "nome": "Luna",
         "distrito": "Atafona",
         "especie": "Gato",
@@ -33,6 +35,7 @@ ANIMAIS = [
         "imagem_alt": "Ilustração de Luna, uma gata cinza de olhos verdes.",
     },
     {
+        "id": 3,
         "nome": "Paçoca",
         "distrito": "Grussaí",
         "especie": "Cachorro",
@@ -44,6 +47,7 @@ ANIMAIS = [
         "imagem_alt": "Ilustração de Paçoca, um cachorro claro com uma mancha marrom.",
     },
     {
+        "id": 4,
         "nome": "Amora",
         "distrito": "Barcelos",
         "especie": "Gato",
@@ -87,6 +91,14 @@ def animais():
         filtros=filtros,
         opcoes_filtros=OPCOES_FILTROS,
     )
+
+
+@app.get("/animais/<int:id>")
+def animal_detalhes(id):
+    for animal in ANIMAIS:
+        if animal["id"] == id:
+            return render_template("animal_detalhes.html", animal=animal)
+    abort(404)
 
 
 if __name__ == "__main__":

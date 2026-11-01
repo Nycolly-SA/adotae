@@ -8,6 +8,8 @@ Esta primeira versão apresenta o projeto e um catálogo com quatro animais fict
 
 Em `/animais`, é possível combinar filtros por tipo de animal, porte e distrito. Use “Aplicar filtros” para consultar e “Limpar” para voltar ao catálogo completo. Os filtros são enviados por parâmetros GET na URL.
 
+Cada cartão oferece “Ver detalhes”, que abre `/animais/<id>` com a imagem, os dados e a descrição do animal, além de um link de volta ao catálogo. A seção de contato é apenas demonstrativa, sem contatos ou ações funcionais. Identificadores inexistentes retornam HTTP 404.
+
 ## Tecnologias
 
 - Python e Flask
@@ -39,7 +41,7 @@ Depois, abra **http://localhost:5000** no navegador. Para encerrar, pressione `C
 
 ## Testes
 
-Os testes verificam as páginas, os links, os arquivos do site e os filtros do catálogo (incluindo combinações, resultado vazio, limpeza e parâmetros desconhecidos). Para executá-los no Windows:
+Os testes verificam as páginas, os links, os arquivos do site, os filtros do catálogo, os dados individuais dos quatro animais e o retorno 404 para identificadores inexistentes. Para executá-los no Windows:
 
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover -v
