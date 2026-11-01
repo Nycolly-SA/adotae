@@ -8,9 +8,27 @@
             <h1 id="titulo-catalogo">Cada focinho, uma história.</h1>
             <p>Uma pequena apresentação de quem poderia fazer parte da sua vida.</p>
         </div>
-        <span class="catalog-count">{{ animais|length }} histórias para conhecer</span>
+        <span class="catalog-count">{{ animais|length }} {{ 'animal encontrado' if animais|length == 1 else 'animais encontrados' }}</span>
     </div>
     <div class="catalog-notice"><span class="note-symbol" aria-hidden="true">i</span><p>Catálogo demonstrativo: os animais e os dados são fictícios. Ainda não é possível solicitar uma adoção por aqui.</p></div>
+    <form method="get" action="{{ url_for('animais') }}" class="catalog-filters">
+        {% for campo, rotulo in [('tipo', 'Tipo de animal'), ('porte', 'Porte'), ('distrito', 'Distrito')] %}
+        <div class="filter-field">
+            <label for="filtro-{{ campo }}">{{ rotulo }}</label>
+            <select id="filtro-{{ campo }}" name="{{ campo }}">
+                <option value=""{% if not filtros[campo] %} selected{% endif %}>Todos</option>
+                {% for opcao in opcoes_filtros[campo] %}
+                <option value="{{ opcao }}"{% if filtros[campo] == opcao %} selected{% endif %}>{{ opcao }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        {% endfor %}
+        <div class="filter-actions">
+            <button type="submit" class="button">Aplicar filtros</button>
+            <a href="{{ url_for('animais') }}" class="filter-clear">Limpar</a>
+        </div>
+    </form>
+    {% if animais %}
     <div class="animal-grid">
         {% for animal in animais %}
         <article class="animal-card" aria-labelledby="animal-{{ loop.index }}">
@@ -30,6 +48,12 @@
         </article>
         {% endfor %}
     </div>
+    {% else %}
+    <div class="catalog-empty">
+        <h2>Nenhum animal encontrado</h2>
+        <p>Tente ajustar os filtros ou clique em Limpar para conhecer todos os nossos amigos.</p>
+    </div>
+    {% endif %}
     <p class="catalog-closing">Acolher é um compromisso para a vida toda. Cada laço merece cuidado.</p>
 </section>
 {% endblock %}

@@ -100,6 +100,17 @@ h1, h2 { font-family: var(--heading-font); font-weight: 400; letter-spacing: -.0
 .catalog-heading p:last-child { color: var(--muted); margin-bottom: 0; max-width: 560px; }
 .catalog-count { flex-shrink: 0; color: var(--muted); font-size: 13px; padding-bottom: 4px; }
 .catalog-notice { display: flex; gap: 12px; align-items: center; background: var(--sage-light); border-radius: 8px; padding: 16px 20px; color: var(--green); font-size: 13px; margin-bottom: 32px; }
+.catalog-filters { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 20px; margin-bottom: 32px; }
+.filter-field { flex: 1 1 210px; min-width: 0; }
+.filter-field label { display: block; margin-bottom: 8px; font-size: 14px; font-weight: 600; }
+.filter-field select { width: 100%; min-height: 54px; padding: 12px; border: 1px solid var(--green); border-radius: 8px; background: var(--surface); color: var(--text); font: inherit; }
+.filter-field select:focus-visible { outline: 3px solid var(--green); outline-offset: 5px; }
+.filter-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 20px; }
+.filter-actions .button { border: 0; cursor: pointer; }
+.filter-clear { display: inline-flex; align-items: center; min-height: 54px; padding-inline: 8px; font-size: 14px; font-weight: 600; }
+.catalog-empty { padding: 40px 24px; text-align: center; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); }
+.catalog-empty h2 { font-size: 26px; margin-bottom: 16px; }
+.catalog-empty p { margin-bottom: 0; color: var(--muted); }
 .animal-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 22px; }
 .animal-card { overflow: hidden; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; }
 .card-image { position: relative; }
@@ -155,6 +166,7 @@ h1, h2 { font-family: var(--heading-font); font-weight: 400; letter-spacing: -.0
     .site-footer { padding-block: 24px; }
     .footer-inner { flex-direction: column; align-items: flex-start; }
     .catalog { padding-block: 40px; }
+    .filter-field, .filter-actions { flex-basis: 100%; }
     .animal-grid { grid-template-columns: 1fr; }
     .catalog-notice { align-items: flex-start; padding: 16px; }
     .card-body { padding: 24px; }

@@ -1,6 +1,6 @@
 """Aplicação demonstrativa do projeto acadêmico Adotaê."""
 
-from flask import Flask, render_template
+from flask import Flask, render_template, request
 
 app = Flask(
     __name__,
@@ -12,6 +12,7 @@ app = Flask(
 ANIMAIS = [
     {
         "nome": "Bento",
+        "distrito": "São João da Barra (sede)",
         "especie": "Cachorro",
         "sexo": "Macho",
         "idade": "2 anos",
@@ -22,7 +23,8 @@ ANIMAIS = [
     },
     {
         "nome": "Luna",
-        "especie": "Gata",
+        "distrito": "Atafona",
+        "especie": "Gato",
         "sexo": "Fêmea",
         "idade": "1 ano",
         "porte": "Pequeno",
@@ -32,6 +34,7 @@ ANIMAIS = [
     },
     {
         "nome": "Paçoca",
+        "distrito": "Grussaí",
         "especie": "Cachorro",
         "sexo": "Macho",
         "idade": "6 meses",
@@ -42,7 +45,8 @@ ANIMAIS = [
     },
     {
         "nome": "Amora",
-        "especie": "Gata",
+        "distrito": "Barcelos",
+        "especie": "Gato",
         "sexo": "Fêmea",
         "idade": "3 anos",
         "porte": "Pequeno",
@@ -52,6 +56,12 @@ ANIMAIS = [
     },
 ]
 
+OPCOES_FILTROS = {
+    "tipo": ("Cachorro", "Gato", "Ave", "Pequeno mamífero", "Outro animal doméstico"),
+    "porte": ("Pequeno", "Médio", "Grande"),
+    "distrito": ("São João da Barra (sede)", "Atafona", "Grussaí", "Cajueiro", "Pipeiras", "Barcelos"),
+}
+
 
 @app.get("/")
 def inicio():
@@ -60,7 +70,23 @@ def inicio():
 
 @app.get("/animais")
 def animais():
-    return render_template("animais.html", animais=ANIMAIS)
+    filtros = {}
+    for campo, opcoes in OPCOES_FILTROS.items():
+        valor = request.args.get(campo, "")
+        filtros[campo] = valor if valor in opcoes else ""
+
+    animais_filtrados = [
+        animal for animal in ANIMAIS
+        if (not filtros["tipo"] or animal["especie"] == filtros["tipo"])
+        and (not filtros["porte"] or animal["porte"] == filtros["porte"])
+        and (not filtros["distrito"] or animal["distrito"] == filtros["distrito"])
+    ]
+    return render_template(
+        "animais.html",
+        animais=animais_filtrados,
+        filtros=filtros,
+        opcoes_filtros=OPCOES_FILTROS,
+    )
 
 
 if __name__ == "__main__":
