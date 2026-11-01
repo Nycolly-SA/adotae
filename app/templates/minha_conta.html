@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Minha conta — Adotaê{% endblock %}
+{% block content %}
+<section class="container registration" aria-labelledby="conta-titulo">
+    <div class="registration-card">
+        <p class="section-label">Minha conta</p>
+        <h1 id="conta-titulo">Olá, {{ g.usuario.user_metadata.get('nome') or 'bem-vindo' }}!</h1>
+        <p>Você está conectado ao Adotaê.</p>
+        <form method="post" action="{{ url_for('logout') }}">
+            {{ form.csrf_token }}
+            <button class="button" type="submit">Sair</button>
+        </form>
+    </div>
+</section>
+{% endblock %}

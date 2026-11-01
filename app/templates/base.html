@@ -24,7 +24,12 @@
                 <a href="{{ url_for('inicio') }}" {% if request.endpoint == 'inicio' %}aria-current="page"{% endif %}>Início</a>
                 <a href="{{ url_for('animais') }}" {% if request.endpoint == 'animais' %}aria-current="page"{% endif %}>Animais</a>
                 <a class="nav-about" href="{{ url_for('inicio') }}#sobre">Sobre o projeto</a>
+                {% if g.usuario %}
+                <a href="{{ url_for('minha_conta') }}" {% if request.endpoint == 'minha_conta' %}aria-current="page"{% endif %}>Minha conta</a>
+                {% else %}
                 <a href="{{ url_for('cadastro') }}" {% if request.endpoint == 'cadastro' %}aria-current="page"{% endif %}>Criar conta</a>
+                <a href="{{ url_for('login') }}" {% if request.endpoint == 'login' %}aria-current="page"{% endif %}>Entrar</a>
+                {% endif %}
             </nav>
         </div>
     </header>

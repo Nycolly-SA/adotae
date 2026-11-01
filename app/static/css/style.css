@@ -54,7 +54,7 @@ a:focus-visible, button:focus-visible { outline: 3px solid var(--green); outline
 .header-inner { min-height: 100px; display: flex; align-items: center; justify-content: space-between; gap: 32px; }
 .brand { display: inline-flex; gap: 11px; align-items: center; color: var(--green); font-size: 26px; font-weight: 750; letter-spacing: -1px; text-decoration: none; line-height: 1; }
 .brand-mark { display: block; flex-shrink: 0; width: 46px; height: 46px; color: var(--terracotta); }
-.site-nav { display: flex; align-items: center; gap: 34px; }
+.site-nav { display: flex; flex-wrap: wrap; align-items: center; gap: 34px; }
 .site-nav a { display: inline-flex; align-items: center; min-height: 44px; font-size: 14px; font-weight: 500; text-decoration: none; }
 .site-nav a:hover { text-decoration: underline; }
 .site-nav a[aria-current='page'] { font-weight: 700; text-decoration: underline; text-decoration-thickness: 2px; }

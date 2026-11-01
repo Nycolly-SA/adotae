@@ -11,7 +11,8 @@ from httpx import HTTPError
 from supabase import AuthApiError, AuthError, ClientOptions, SupabaseException, create_client
 from supabase_auth.types import SignUpWithEmailAndPasswordCredentials
 
-from app.forms import CadastroForm
+from app.forms import CadastroForm, LoginForm
+from app.auth import registrar_auth
 
 load_dotenv(Path(__file__).with_name(".env"))
 
@@ -26,30 +27,32 @@ app.config.update(
     SUPABASE_PUBLISHABLE_KEY=os.getenv("SUPABASE_PUBLISHABLE_KEY", ""),
     SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE="Lax",
+    # HTTP só mediante opção explícita para desenvolvimento; Vercel sempre HTTPS.
+    SESSION_COOKIE_SECURE=bool(os.getenv("VERCEL")) or os.getenv("ADOTAE_LOCAL_HTTP") != "true",
 )
 
 
 @app.before_request
 def verificar_configuracao_csrf():
+    if request.endpoint in ("login", "minha_conta", "logout") and not app.secret_key:
+        return render_template("login.html", indisponivel=True,
+                               mensagem="Acesso à conta indisponível no momento. Tente novamente mais tarde."), 503
     if request.endpoint == "cadastro" and not app.secret_key:
         return render_template("cadastro.html", indisponivel=True,
                                mensagem="Cadastro indisponível no momento. Tente novamente mais tarde."), 503
 
 
+registrar_auth(app)
 CSRFProtect(app)
 
 
 @app.errorhandler(CSRFError)
 def erro_csrf(error):
+    if request.endpoint != "cadastro":
+        return render_template("login.html", form=LoginForm(formdata=None),
+                               mensagem="Não foi possível validar o formulário. Recarregue a página e tente novamente."), 400
     return render_template("cadastro.html", form=CadastroForm(formdata=None),
                            mensagem="Não foi possível validar o formulário. Recarregue a página e tente novamente."), 400
-
-
-@app.after_request
-def impedir_cache_cadastro(response):
-    if request.endpoint == "cadastro":
-        response.headers["Cache-Control"] = "no-store"
-    return response
 
 
 @app.route("/cadastro", methods=["GET", "POST"])

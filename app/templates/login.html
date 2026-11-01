@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+{% block title %}Entrar — Adotaê{% endblock %}
+{% block content %}
+<section class="container registration" aria-labelledby="login-titulo">
+    <div class="registration-card">
+        <p class="section-label">Bem-vindo ao Adotaê</p>
+        <h1 id="login-titulo">Entrar</h1>
+        {% if mensagem %}<p class="registration-message" role="alert">{{ mensagem }}</p>{% endif %}
+        {% if not indisponivel %}
+        <p>Entre com seu e-mail confirmado e sua senha.</p>
+        <form method="post" action="{{ url_for('login') }}">
+            {{ form.csrf_token }}
+            {% for field in (form.email, form.senha) %}
+            <div class="registration-field">
+                {{ field.label }}
+                {{ field(required=true, autocomplete='email' if field.name == 'email' else 'current-password', aria_describedby=field.name ~ '-erro' if field.errors else false, aria_invalid='true' if field.errors else 'false') }}
+                {% if field.errors %}<p id="{{ field.name }}-erro" class="field-error" role="alert">{{ field.errors | join(' ') }}</p>{% endif %}
+            </div>
+            {% endfor %}
+            <button class="button" type="submit">Entrar</button>
+        </form>
+        {% endif %}
+        <a class="text-link" href="{{ url_for('inicio') }}">Voltar ao início</a>
+    </div>
+</section>
+{% endblock %}

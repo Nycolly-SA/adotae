@@ -1,8 +1,16 @@
-"""Validação do formulário de cadastro; senhas são gerenciadas pelo Supabase."""
+"""Validação dos formulários; senhas são gerenciadas pelo Supabase."""
 
 from flask_wtf import FlaskForm
 from wtforms import EmailField, PasswordField, StringField
 from wtforms.validators import DataRequired, Email, Length
+
+
+class LoginForm(FlaskForm):
+    email = EmailField("E-mail", filters=[lambda value: value.strip() if value else ""],
+                       validators=[DataRequired(message="Informe seu e-mail."),
+                                   Email(message="Informe um e-mail válido."),
+                                   Length(max=254, message="Informe um e-mail válido.")])
+    senha = PasswordField("Senha", validators=[DataRequired(message="Informe sua senha.")])
 
 
 class CadastroForm(FlaskForm):
