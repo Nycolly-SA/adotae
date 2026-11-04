@@ -1,5 +1,10 @@
 {% extends "base.html" %}
 {% block content %}
+{% for categoria, mensagem in avisos_confirmacao | default(get_flashed_messages(with_categories=true)) %}
+<div class="container confirmation-notice">
+    <p class="registration-message" role="{{ 'status' if categoria == 'confirmacao-sucesso' else 'alert' }}">{{ mensagem }}{% if categoria == 'confirmacao-sucesso' %} <a href="{{ url_for('login') }}">Entrar</a>{% endif %}</p>
+</div>
+{% endfor %}
 <section class="hero container" aria-labelledby="titulo-inicial">
     <div class="hero-copy">
         <p class="intro-note"><span class="little-heart" aria-hidden="true">♡</span> Todo animal merece um lar</p>

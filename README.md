@@ -12,6 +12,8 @@ Cada cartão oferece “Ver detalhes”, que abre `/animais/<id>` com a imagem, 
 
 Em `/cadastro`, é possível criar uma conta com nome, e-mail e senha de pelo menos 8 caracteres pelo Supabase Auth. O nome é enviado nos metadados `nome`. O formulário valida os dados no servidor e possui proteção CSRF. Após o envio, orienta a confirmação do e-mail, sem iniciar sessão.
 
+O fluxo de confirmação pela rota `/auth/confirm` foi validado manualmente: o servidor valida o `token_hash` com o Supabase e redireciona para a página inicial, sem parâmetros na URL. Uma mensagem temporária informa o resultado abaixo do cabeçalho; em caso de sucesso, oferece um link para entrar. A confirmação não inicia login nem guarda os tokens retornados. Links inválidos, expirados ou já utilizados não mostram sucesso.
+
 Em `/login`, usuários com e-mail confirmado podem entrar. A sessão permanece entre requisições, com renovação dos tokens expirados quando possível. `/minha-conta` exige autenticação e apresenta uma saudação e o botão “Sair”, que envia um POST protegido por CSRF. A navegação oferece “Entrar” ou “Minha conta” conforme a identidade validada. Recuperação de senha, edição de perfil e gerenciamento de anúncios ainda não foram implementados.
 
 ## Tecnologias
@@ -50,13 +52,21 @@ Copie `.env.example` para `.env` e preencha `SUPABASE_URL`, `SUPABASE_PUBLISHABL
 
 Para executar em HTTP local, acrescente `ADOTAE_LOCAL_HTTP=true` ao `.env`. Em produção, omita essa variável ou use `false` e utilize HTTPS. Os cookies usam `Secure` por padrão; na Vercel, esse atributo é obrigatório mesmo que a opção local esteja presente. Configure as variáveis no ambiente da hospedagem. A implantação na Vercel ainda não foi validada.
 
-No painel de um projeto gratuito do Supabase, habilite o provedor de e-mail e o cadastro de novos usuários, mantenha **Confirm email** ativado e configure **Site URL** com `http://localhost:5000` durante o desenvolvimento (a URL pública quando houver hospedagem). A confirmação usa o link padrão do Supabase; o Adotaê não consome nem guarda os tokens retornados no redirecionamento.
+No painel de um projeto gratuito do Supabase, habilite o provedor de e-mail e o cadastro de novos usuários, mantenha **Confirm email** ativado e configure **Site URL** com `http://localhost:5000` durante o desenvolvimento (a URL pública quando houver hospedagem), sem barra final. Em **Authentication → Notifications → Emails → Confirm sign up**, substitua o link que usa `{{ .ConfirmationURL }}` por:
 
-Sem SMTP próprio, o serviço padrão envia apenas para e-mails de membros da equipe do projeto e possui limites de envio. A validação manual deve usar um desses endereços. SMTP não foi configurado nesta etapa; o envio ao público geral fica pendente de uma decisão futura. Consulte as [limitações oficiais de envio](https://supabase.com/docs/guides/auth/auth-smtp).
+```html
+<a href="{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&amp;type=email">Confirmar meu e-mail</a>
+```
+
+O servidor usa `verify_otp({"token_hash": ..., "type": "email"})` com um cliente isolado, sem persistência nem renovação automática. Consulte a referência oficial de [verificação OTP em Python](https://supabase.com/docs/reference/python/auth-verifyotp) e as [variáveis dos templates de e-mail](https://supabase.com/docs/guides/auth/auth-email-templates). Essa alteração no painel é manual; o código não modifica configurações do Supabase. E-mails antigos mantêm o link anterior.
+
+A rota de confirmação responde com `Cache-Control: no-store` e `Referrer-Policy: no-referrer`. O log de acesso local do Werkzeug oculta os parâmetros dessa rota. Na hospedagem ou em um proxy, configure também os logs de acesso para omitir a query de `/auth/confirm`, pois essas camadas recebem o link antes do Flask.
+
+O projeto principal do Supabase está configurado com SMTP personalizado via Gmail e template de confirmação em português. O envio foi testado com um endereço externo à equipe do Supabase: o e-mail foi recebido e a confirmação foi concluída com sucesso, mas a mensagem foi direcionada à pasta de spam. O Gmail pode apresentar limitações de entrega; o uso de um serviço transacional gratuito poderá ser avaliado posteriormente. Consulte as [limitações oficiais de envio](https://supabase.com/docs/guides/auth/auth-smtp).
 
 ### Segurança e limites da sessão
 
-Os tokens ficam em cookies exclusivos `HttpOnly`, `SameSite=Lax`, sem domínio compartilhado. Não são armazenados na sessão assinada do Flask, que guarda apenas o segredo CSRF. Os cookies de autenticação duram a sessão do navegador; a validade dos tokens é controlada pelo Supabase. Eles não são criptografados pela aplicação: dependem de HTTPS e da proteção do navegador e devem ser tratados como credenciais.
+Os tokens de login ficam em cookies exclusivos `HttpOnly`, `SameSite=Lax`, sem domínio compartilhado. Não são armazenados na sessão assinada do Flask, que guarda o segredo CSRF e os avisos temporários, sem credenciais. Os cookies de autenticação duram a sessão do navegador; a validade dos tokens é controlada pelo Supabase. Eles não são criptografados pela aplicação: dependem de HTTPS e da proteção do navegador e devem ser tratados como credenciais.
 
 Cada requisição com autenticação usa um cliente Supabase isolado, restaura ou renova a sessão com `set_session` e valida a identidade no servidor com `get_user`. Respostas autenticadas e páginas de autenticação usam `Cache-Control: no-store`. Não há estado de autenticação em disco ou compartilhado entre instâncias, nem novas tabelas ou dependências.
 
@@ -64,7 +74,7 @@ O logout solicita o encerramento apenas da sessão atual (`scope=local`) e remov
 
 ## Testes
 
-Os testes verificam páginas, catálogo, arquivos estáticos, cadastro, login, sessão válida e expirada, renovação, logout, CSRF, isolamento entre usuários e ausência de credenciais no HTML, URLs, logs e sessão Flask. Os testes de autenticação usam mocks; os de login exercitam o SDK real com transporte HTTP simulado, sem chamadas ao Supabase ou credenciais reais. Para executá-los no Windows:
+Os testes verificam páginas, catálogo, arquivos estáticos, cadastro, confirmação de e-mail, login, sessão válida e expirada, renovação, logout, CSRF, isolamento entre usuários e ausência de credenciais no HTML, URLs, logs e sessão Flask. Os testes de autenticação usam mocks; os de login e confirmação exercitam o SDK real com transporte HTTP simulado, sem chamadas ao Supabase ou credenciais reais. A confirmação cobre sucesso, links inválidos, expirados ou utilizados, falha do serviço e ausência de login automático. Para executá-los no Windows:
 
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover -v

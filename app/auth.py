@@ -1,6 +1,9 @@
 """Sessão Supabase em cookies HttpOnly, sem armazenamento em disco ou memória global."""
 
-from flask import current_app, g, redirect, render_template, request, session, url_for
+import logging
+import re
+
+from flask import current_app, flash, g, redirect, render_template, request, session, url_for
 from flask_wtf import FlaskForm
 from httpx import HTTPError
 from supabase import AuthApiError, AuthError, ClientOptions, SupabaseException, create_client
@@ -12,6 +15,17 @@ ACCESS_COOKIE = "adotae_access"
 REFRESH_COOKIE = "adotae_refresh"
 INDISPONIVEL = "Não foi possível acessar sua conta agora. Tente novamente mais tarde."
 FALHAS = (AuthError, HTTPError, SupabaseException, ValueError, IndexError, KeyError)
+CONFIRMACAO_INVALIDA = "Este link de confirmação é inválido, expirou ou já foi utilizado."
+CONFIRMACAO_INDISPONIVEL = "Não foi possível confirmar seu e-mail agora. Tente novamente mais tarde."
+
+
+class OcultarConfirmacao(logging.Filter):
+    """Remove a query sensível dos registros de acesso do servidor local."""
+
+    def filter(self, record):
+        record.msg = re.sub(r"(/auth/confirm)\?[^\s]*", r"\1?[oculto]", record.getMessage())
+        record.args = ()
+        return True
 
 
 def novo_cliente():
@@ -25,13 +39,15 @@ def novo_cliente():
 
 
 def registrar_auth(app):
+    logging.getLogger("werkzeug").addFilter(OcultarConfirmacao())
+
     @app.before_request
     def carregar_usuario():
         g.usuario = None
         g.auth_indisponivel = False
         g.auth_tokens = None
         g.limpar_auth = False
-        if request.endpoint == "static":
+        if request.endpoint in ("static", "confirmar_email"):
             return
         access = request.cookies.get(ACCESS_COOKIE)
         refresh = request.cookies.get(REFRESH_COOKIE)
@@ -78,11 +94,46 @@ def registrar_auth(app):
             # Cookies de navegador: a validade efetiva é controlada pelo Supabase.
             response.set_cookie(ACCESS_COOKIE, g.auth_tokens.access_token, **opcoes)
             response.set_cookie(REFRESH_COOKIE, g.auth_tokens.refresh_token, **opcoes)
-        if (request.endpoint in ("login", "minha_conta", "logout", "cadastro")
+        if (request.endpoint in ("login", "minha_conta", "logout", "cadastro", "confirmar_email")
+                or session.modified
                 or request.cookies.get(ACCESS_COOKIE) or request.cookies.get(REFRESH_COOKIE)
                 or getattr(g, "auth_tokens", None)):
             response.headers["Cache-Control"] = "no-store"
+        if request.endpoint == "confirmar_email":
+            response.headers["Referrer-Policy"] = "no-referrer"
         return response
+
+    @app.get("/auth/confirm")
+    def confirmar_email():
+        if not app.secret_key:
+            # Sem assinatura de sessão não é possível transportar um aviso confiável.
+            return render_template("index.html", avisos_confirmacao=[
+                ("confirmacao-erro", CONFIRMACAO_INDISPONIVEL),
+            ]), 503
+        mensagem, categoria = CONFIRMACAO_INVALIDA, "confirmacao-erro"
+        token_hash = request.args.get("token_hash", "")
+        if token_hash.strip() and request.args.get("type") == "email":
+            mensagem = CONFIRMACAO_INDISPONIVEL
+            try:
+                cliente = novo_cliente()
+                resposta = cliente.auth.verify_otp({"token_hash": token_hash, "type": "email"})
+                if resposta and resposta.user and resposta.user.email_confirmed_at:
+                    mensagem = ("E-mail confirmado com sucesso! Sua conta está pronta. "
+                                "Você já pode entrar no Adotaê.")
+                    categoria = "confirmacao-sucesso"
+                # Não copiar a sessão retornada para g, cookies ou sessão Flask.
+            except AuthApiError as error:
+                if error.status < 500 and error.status != 429:
+                    mensagem = CONFIRMACAO_INVALIDA
+            except FALHAS:
+                pass
+        # Um novo resultado substitui avisos de confirmação ainda não exibidos.
+        session["_flashes"] = [
+            (tipo, texto) for tipo, texto in session.get("_flashes", [])
+            if tipo not in ("confirmacao-sucesso", "confirmacao-erro")
+        ]
+        flash(mensagem, categoria)
+        return redirect(url_for("inicio"))
 
     @app.route("/login", methods=["GET", "POST"])
     def login():

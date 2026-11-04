@@ -146,6 +146,8 @@ h1, h2 { font-family: var(--heading-font); font-weight: 400; letter-spacing: -.0
 .registration-field input:focus-visible { outline: 3px solid var(--green); outline-offset: 3px; }
 .registration-field small { color: var(--muted); }
 .registration-message { padding: 16px; background: var(--sage-light); border-radius: 8px; overflow-wrap: anywhere; }
+.confirmation-notice { padding-top: 20px; font-size: 14px; }
+.confirmation-notice .registration-message { margin: 0; }
 .field-error { margin: 0; font-size: 14px; font-weight: 600; }
 .registration .button { width: 100%; border: 0; cursor: pointer; }
 @media (max-width: 1024px) {
