@@ -16,6 +16,21 @@ O fluxo de confirmação pela rota `/auth/confirm` foi validado manualmente: o s
 
 Em `/login`, usuários com e-mail confirmado podem entrar. A sessão permanece entre requisições, com renovação dos tokens expirados quando possível. `/minha-conta` exige autenticação e apresenta uma saudação e o botão “Sair”, que envia um POST protegido por CSRF. A navegação oferece “Entrar” ou “Minha conta” conforme a identidade validada. Recuperação de senha, edição de perfil e gerenciamento de anúncios ainda não foram implementados.
 
+A migração de `public.animais` foi aplicada em `adotae-testes` e no projeto
+principal. No projeto de testes, foram aprovados cenários manuais de RLS,
+privilégios e constraints e testes reais pela Data API com chave publicável,
+dois usuários distintos e acesso anônimo. A limpeza temporária foi concluída.
+No principal, a auditoria após correção dos privilégios passou em 10 de 10
+verificações, e a leitura anônima pela API retornou zero registros sem erro.
+A escrita autenticada pela API ainda não foi testada no principal.
+O catálogo continua demonstrativo, sem integração ao banco.
+
+Consulte [supabase/README.md](supabase/README.md) para os arquivos e limites.
+Habilitar tabelas na Data API pode alterar privilégios SQL e exige nova auditoria.
+A leitura pública permite expor `usuario_id`; essa decisão precisa de revisão
+antes da API pública definitiva. Publicação e moderação ainda não têm mecanismo
+implementado.
+
 ## Tecnologias
 
 - Python e Flask
@@ -81,3 +96,10 @@ Os testes verificam páginas, catálogo, arquivos estáticos, cadastro, confirma
 ```
 
 No Linux ou macOS, use `.venv/bin/python -m unittest discover -v`.
+
+Nesta revisão, a suíte local passou com 74 testes (o histórico anterior informava
+70), incluindo os testes offline do
+[roteiro da Data API](supabase/tests/validar_data_api.py), em
+[tests/test_validacao_data_api.py](tests/test_validacao_data_api.py).
+Esses testes usam mocks e não comprovam as políticas instaladas no Supabase.
+Os resultados remotos são registrados separadamente no README do banco.
