@@ -56,6 +56,9 @@ def registrar_auth(app):
         if not access or not refresh:
             g.limpar_auth = True
             return
+        if not app.config["SUPABASE_URL"] or not app.config["SUPABASE_PUBLISHABLE_KEY"]:
+            g.auth_indisponivel = True
+            return
         try:
             cliente = novo_cliente()
             # O SDK renova access tokens expirados. Seus dados locais não são
@@ -94,7 +97,7 @@ def registrar_auth(app):
             # Cookies de navegador: a validade efetiva é controlada pelo Supabase.
             response.set_cookie(ACCESS_COOKIE, g.auth_tokens.access_token, **opcoes)
             response.set_cookie(REFRESH_COOKIE, g.auth_tokens.refresh_token, **opcoes)
-        if (request.endpoint in ("login", "minha_conta", "logout", "cadastro", "confirmar_email")
+        if (request.endpoint in ("login", "minha_conta", "logout", "cadastro", "confirmar_email", "anunciar")
                 or session.modified
                 or request.cookies.get(ACCESS_COOKIE) or request.cookies.get(REFRESH_COOKIE)
                 or getattr(g, "auth_tokens", None)):

@@ -3,16 +3,18 @@
 import os
 from pathlib import Path
 from typing import cast
+from uuid import UUID
 
 from dotenv import load_dotenv
-from flask import Flask, abort, render_template, request
+from flask import Flask, abort, flash, g, redirect, render_template, request, url_for
 from flask_wtf.csrf import CSRFError, CSRFProtect
 from httpx import HTTPError
+from postgrest.exceptions import APIError
 from supabase import AuthApiError, AuthError, ClientOptions, SupabaseException, create_client
 from supabase_auth.types import SignUpWithEmailAndPasswordCredentials
 
-from app.forms import CadastroForm, LoginForm
-from app.auth import registrar_auth
+from app.forms import AnimalForm, CadastroForm, LoginForm
+from app.auth import INDISPONIVEL, registrar_auth
 
 load_dotenv(Path(__file__).with_name(".env"))
 
@@ -34,7 +36,7 @@ app.config.update(
 
 @app.before_request
 def verificar_configuracao_csrf():
-    if request.endpoint in ("login", "minha_conta", "logout") and not app.secret_key:
+    if request.endpoint in ("login", "minha_conta", "logout", "anunciar") and not app.secret_key:
         return render_template("login.html", indisponivel=True,
                                mensagem="Acesso à conta indisponível no momento. Tente novamente mais tarde."), 503
     if request.endpoint == "cadastro" and not app.secret_key:
@@ -48,6 +50,9 @@ CSRFProtect(app)
 
 @app.errorhandler(CSRFError)
 def erro_csrf(error):
+    if request.endpoint == "anunciar":
+        return render_template("anunciar.html", form=AnimalForm(OPCOES_FILTROS),
+                               mensagem="Não foi possível validar o formulário. Recarregue a página e tente novamente."), 400
     if request.endpoint != "cadastro":
         return render_template("login.html", form=LoginForm(formdata=None),
                                mensagem="Não foi possível validar o formulário. Recarregue a página e tente novamente."), 400
@@ -153,6 +158,40 @@ OPCOES_FILTROS = {
     "porte": ("Pequeno", "Médio", "Grande"),
     "distrito": ("São João da Barra (sede)", "Atafona", "Grussaí", "Cajueiro", "Pipeiras", "Barcelos"),
 }
+
+
+@app.route("/anunciar", methods=["GET", "POST"])
+def anunciar():
+    if g.auth_indisponivel:
+        return render_template("anunciar.html", indisponivel=True, mensagem=INDISPONIVEL), 503
+    if not g.usuario:
+        return redirect(url_for("login"))
+    form = AnimalForm(OPCOES_FILTROS)
+    if request.method == "GET":
+        return render_template("anunciar.html", form=form)
+    if not form.validate_on_submit():
+        return render_template("anunciar.html", form=form), 400
+    mensagem = "Não foi possível salvar o rascunho agora. Tente novamente mais tarde."
+    try:
+        # set_session no cliente desta requisição envia o JWT validado/renovado
+        # também à Data API. A chave publicável permanece no cabeçalho apikey.
+        resposta = g.auth_cliente.table("animais").insert(form.dados_insert()).execute()
+        registros = resposta.data
+        if not isinstance(registros, list) or len(registros) != 1:
+            raise ValueError("Resposta de INSERT inválida")
+        animal = registros[0]
+        if (not isinstance(animal, dict) or animal.get("status_publicacao") != "rascunho"
+                or animal.get("usuario_id") != str(g.usuario.id)):
+            raise ValueError("Rascunho não confirmado")
+        UUID(str(animal.get("id")))
+    except APIError:
+        # Não retornar nem registrar detalhes da Data API ou credenciais.
+        return render_template("anunciar.html", form=form, mensagem=mensagem), 503
+    except (HTTPError, SupabaseException, ValueError, TypeError):
+        return render_template("anunciar.html", form=form, mensagem=mensagem), 503
+    flash("Animal cadastrado como rascunho! Você poderá adicionar fotos e solicitar "
+          "a publicação posteriormente.", "rascunho-sucesso")
+    return redirect(url_for("minha_conta"))
 
 
 @app.get("/")

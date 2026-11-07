@@ -131,6 +131,19 @@ class LoginTests(unittest.TestCase):
             self.assertIn('role="alert"', response.text)
         self.assertEqual(self.calls, [])
 
+    def test_login_accepts_test_domain_but_rejects_malformed_addresses(self):
+        for email in ("teste.aexample.test", "teste.a@@example.test", "teste.a@.test"):
+            with self.subTest(email=email):
+                response = self.login(email=email)
+                self.assertEqual(response.status_code, 400)
+                self.assertIn("Informe um e-mail válido.", response.text)
+        self.assertEqual(self.calls, [])
+
+        response = self.login(email="teste.a@example.test")
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.location, "/minha-conta")
+        self.assertEqual(json.loads(self.calls[0].content)["email"], "teste.a@example.test")
+
     def test_unconfirmed_user_even_if_provider_allows_password_login(self):
         self.confirmed = False
         response = self.login()

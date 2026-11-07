@@ -4,7 +4,7 @@ Projeto acadêmico de Engenharia de Software com o objetivo de facilitar a adoç
 
 ## Etapa atual
 
-Esta primeira versão apresenta o projeto e um catálogo com quatro animais fictícios. O site se adapta a celulares e computadores. O catálogo é demonstrativo: ainda não é possível cadastrar animais ou solicitar uma adoção.
+Esta versão apresenta o projeto e um catálogo com quatro animais fictícios. O site se adapta a celulares e computadores. O catálogo permanece demonstrativo; os novos cadastros são salvos separadamente como rascunhos.
 
 Em `/animais`, é possível combinar filtros por tipo de animal, porte e distrito. Use “Aplicar filtros” para consultar e “Limpar” para voltar ao catálogo completo. Os filtros são enviados por parâmetros GET na URL.
 
@@ -15,6 +15,10 @@ Em `/cadastro`, é possível criar uma conta com nome, e-mail e senha de pelo me
 O fluxo de confirmação pela rota `/auth/confirm` foi validado manualmente: o servidor valida o `token_hash` com o Supabase e redireciona para a página inicial, sem parâmetros na URL. Uma mensagem temporária informa o resultado abaixo do cabeçalho; em caso de sucesso, oferece um link para entrar. A confirmação não inicia login nem guarda os tokens retornados. Links inválidos, expirados ou já utilizados não mostram sucesso.
 
 Em `/login`, usuários com e-mail confirmado podem entrar. A sessão permanece entre requisições, com renovação dos tokens expirados quando possível. `/minha-conta` exige autenticação e apresenta uma saudação e o botão “Sair”, que envia um POST protegido por CSRF. A navegação oferece “Entrar” ou “Minha conta” conforme a identidade validada. Recuperação de senha, edição de perfil e gerenciamento de anúncios ainda não foram implementados.
+
+Em `/minha-conta`, o link “Anunciar animal” abre `/anunciar`. Usuários autenticados com e-mail confirmado podem preencher os dados do animal e salvar um rascunho no Supabase, sem fotos e com contatos opcionais. O formulário usa Flask-WTF, CSRF e validação no servidor, reutilizando as opções do catálogo. Campos opcionais vazios viram NULL; o detalhe de espécie é obrigatório apenas para “Outro animal doméstico”. Após sucesso, a aplicação redireciona para a conta com uma mensagem temporária. Fotografias, publicação, moderação, edição, exclusão e listagem de anúncios próprios ainda não estão disponíveis.
+
+O INSERT usa o cliente isolado da requisição: chave publicável em `apikey` e JWT do usuário validado (ou renovado) em `Authorization`, respeitando a RLS. Envia apenas as colunas permitidas, deixando proprietário, estados, ID e datas para o banco. O sucesso exige retorno de um registro com UUID válido, estado `rascunho` e proprietário igual ao usuário autenticado. Esta implementação foi testada offline com o SDK real e HTTP simulado. Conforme a validação manual realizada em `adotae-testes`, o login com conta `.test` e o cadastro de um animal fictício pelo navegador funcionaram; o registro foi confirmado no PostgreSQL com proprietário e estados iniciais corretos. A consulta anônima pela Data API não retornou o rascunho. O registro fictício foi excluído e a tabela de testes ficou novamente vazia.
 
 A migração de `public.animais` foi aplicada em `adotae-testes` e no projeto
 principal. No projeto de testes, foram aprovados cenários manuais de RLS,
@@ -97,8 +101,8 @@ Os testes verificam páginas, catálogo, arquivos estáticos, cadastro, confirma
 
 No Linux ou macOS, use `.venv/bin/python -m unittest discover -v`.
 
-Nesta revisão, a suíte local passou com 74 testes (o histórico anterior informava
-70), incluindo os testes offline do
+Nesta revisão, a suíte local passou com 87 testes, incluindo 12 testes de cadastro
+de rascunhos (validação, CSRF, payload, JWT, falhas e preservação do catálogo) e os testes offline do
 [roteiro da Data API](supabase/tests/validar_data_api.py), em
 [tests/test_validacao_data_api.py](tests/test_validacao_data_api.py).
 Esses testes usam mocks e não comprovam as políticas instaladas no Supabase.

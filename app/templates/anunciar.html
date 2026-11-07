@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Anunciar animal — Adotaê{% endblock %}
+{% block content %}
+<section class="container registration" aria-labelledby="anunciar-titulo">
+    <div class="registration-card">
+        <p class="section-label">Um novo começo</p>
+        <h1 id="anunciar-titulo">Anunciar animal</h1>
+        <p>Cadastre um animal doméstico de São João da Barra, RJ. Ele será salvo como rascunho e não aparecerá no catálogo público.</p>
+        {% if mensagem %}<p class="registration-message" role="alert">{{ mensagem }}</p>{% endif %}
+        {% if not indisponivel %}
+        <p>Os campos são obrigatórios, exceto os indicados como opcionais. Não é necessário informar contatos ou adicionar fotos nesta etapa.</p>
+        <p>Os contatos que você escolher informar serão públicos quando o anúncio for publicado. Não informe seu endereço completo.</p>
+        <form method="post" action="{{ url_for('anunciar') }}">
+            {{ form.csrf_token }}
+            {% for field in (form.nome, form.especie, form.especie_outro, form.sexo, form.idade_aproximada, form.porte, form.descricao, form.distrito, form.bairro, form.email_contato, form.whatsapp) %}
+            <div class="registration-field">
+                {{ field.label }}
+                {% set ajuda = field.name in ('especie_outro', 'whatsapp') %}
+                {{ field(aria_describedby=(field.name ~ '-ajuda ' if ajuda else '') ~ (field.name ~ '-erro' if field.errors else ''), aria_invalid='true' if field.errors else 'false') }}
+                {% if field.name == 'especie_outro' %}
+                <small id="especie_outro-ajuda">Preencha somente se selecionou “Outro animal doméstico”. Nesse caso, este campo é obrigatório.</small>
+                {% elif field.name == 'whatsapp' %}
+                <small id="whatsapp-ajuda">Use somente dígitos, de 8 a 15 caracteres, começando de 1 a 9. Inclua o código do país e o DDD quando aplicável, sem +, espaços ou pontuação. Exemplo: 5522999999999.</small>
+                {% endif %}
+                {% if field.errors %}<p id="{{ field.name }}-erro" class="field-error" role="alert">{{ field.errors | join(' ') }}</p>{% endif %}
+            </div>
+            {% endfor %}
+            <button class="button" type="submit">Salvar como rascunho</button>
+        </form>
+        {% endif %}
+        <p><a class="text-link" href="{{ url_for('minha_conta') }}">Voltar à minha conta</a></p>
+    </div>
+</section>
+{% endblock %}
