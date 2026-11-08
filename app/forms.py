@@ -28,6 +28,10 @@ class CadastroForm(FlaskForm):
     ])
 
 
+class FotoForm(FlaskForm):
+    foto = FileField("Fotografia", render_kw={"accept": "image/jpeg,image/png,image/webp"})
+
+
 def limpar_texto(value):
     return value.strip() if value else ""
 

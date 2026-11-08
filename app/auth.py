@@ -99,7 +99,7 @@ def registrar_auth(app):
             # Cookies de navegador: a validade efetiva é controlada pelo Supabase.
             response.set_cookie(ACCESS_COOKIE, g.auth_tokens.access_token, **opcoes)
             response.set_cookie(REFRESH_COOKIE, g.auth_tokens.refresh_token, **opcoes)
-        if (request.endpoint in ("login", "minha_conta", "logout", "cadastro", "confirmar_email", "anunciar", "editar_anuncio")
+        if (request.endpoint in ("login", "minha_conta", "logout", "cadastro", "confirmar_email", "anunciar", "editar_anuncio", "adicionar_foto")
                 or session.modified
                 or request.cookies.get(ACCESS_COOKIE) or request.cookies.get(REFRESH_COOKIE)
                 or getattr(g, "auth_tokens", None)):

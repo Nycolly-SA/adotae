@@ -22,6 +22,16 @@ A seção “Meus anúncios” em `/minha-conta` consulta a Data API com o clien
 
 Em `/anuncios/<uuid>/editar`, o proprietário autenticado pode editar os dados de seus rascunhos, com as mesmas validações do cadastro e proteção CSRF. As fotografias permanecem intactas. Leitura e UPDATE filtram UUID, proprietário e status de rascunho; apenas os campos permitidos são enviados. A confirmação exige retorno válido com os dados salvos. Atualização sem registros retorna HTTP 409; falhas ou respostas inesperadas retornam HTTP 503, sem mensagem de sucesso. Anúncios inexistentes, de terceiros ou publicados retornam HTTP 404. As respostas usam `Cache-Control: no-store`. O fluxo foi validado offline com o SDK real e HTTP simulado.
 
+Na opção “Fotografia” dos rascunhos em `/minha-conta`, a página
+`/anuncios/<uuid>/foto` permite adicionar a primeira fotografia a um rascunho
+próprio, sem criar outro anúncio. Qualquer reserva `pendente`, `pronta` ou
+`removendo` bloqueia novo envio; falhas de consulta também bloqueiam o formulário.
+Reutiliza o processamento e o upload de `/anunciar`, com limite HTTP de 4 MiB,
+CSRF e `Cache-Control: no-store`. Só informa sucesso após consultar a reserva
+como `pronta`. Falhas parciais mantêm reservas e arquivos para recuperação futura,
+sem reenvio automático. Não há pré-visualização, substituição ou exclusão.
+Este fluxo foi validado apenas por testes offline com HTTP simulado.
+
 O INSERT usa o cliente isolado da requisição: chave publicável em `apikey` e JWT do usuário validado (ou renovado) em `Authorization`, respeitando a RLS. Envia apenas as colunas permitidas, deixando proprietário, estados, ID e datas para o banco. O sucesso exige retorno de um registro com UUID válido, estado `rascunho` e proprietário igual ao usuário autenticado. Esta implementação foi testada offline com o SDK real e HTTP simulado. Conforme a validação manual realizada em `adotae-testes`, o login com conta `.test` e o cadastro de um animal fictício pelo navegador funcionaram; o registro foi confirmado no PostgreSQL com proprietário e estados iniciais corretos. A consulta anônima pela Data API não retornou o rascunho. O registro fictício foi excluído e a tabela de testes ficou novamente vazia.
 
 A migração de `public.animais` foi aplicada em `adotae-testes` e no projeto
@@ -61,7 +71,7 @@ exibe um aviso específico, sem anunciar a foto como adicionada. Respostas
 perdidas podem deixar uma reserva pendente, um arquivo vinculado sem confirmação
 ou uma confirmação concluída cujo resultado não foi recebido. Não há exclusão
 ou repetição automática dessas operações. A reserva continua ocupando a posição
-e a recuperação ainda não está disponível pela interface; reenviar o formulário
+e a recuperação ainda não está disponível pela interface; reenviar `/anunciar`
 criaria outro anúncio. O upload usa cache-control zero, sujeito à
 [ressalva de cache documentada](supabase/README.md#validação-do-storage-e-limitação-de-cache).
 Esta integração foi validada apenas por testes offline.
@@ -133,7 +143,9 @@ Os testes verificam páginas, catálogo, arquivos estáticos, cadastro, confirma
 
 No Linux ou macOS, use `.venv/bin/python -m unittest discover -v`.
 
-Os testes incluem cadastro
+Os testes incluem adição de fotografia a rascunhos existentes (reservas em todos
+os estados, confirmação, conflitos, respostas inesperadas, falhas parciais, CSRF
+e limites HTTP), cadastro
 e edição dos próprios rascunhos (validação, CSRF, payload, JWT, titularidade, status, falhas, respostas inesperadas e preservação das fotos e do catálogo) e os testes offline do
 [roteiro da Data API](supabase/tests/validar_data_api.py), em
 [tests/test_validacao_data_api.py](tests/test_validacao_data_api.py).

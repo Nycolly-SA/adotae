@@ -26,6 +26,7 @@
                     </dl>
                     {% if animal.status_publicacao == 'rascunho' %}
                     <a class="text-link" href="{{ url_for('editar_anuncio', animal_id=animal.id) }}">Editar</a>
+                    <a class="text-link" href="{{ url_for('adicionar_foto', animal_id=animal.id) }}">Fotografia</a>
                     {% endif %}
                 </li>
                 {% endfor %}

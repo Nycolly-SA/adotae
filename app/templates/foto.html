@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Fotografia do rascunho — Adotaê{% endblock %}
+{% block content %}
+<section class="container registration" aria-labelledby="foto-titulo">
+    <div class="registration-card">
+        <p class="section-label">Meus anúncios</p>
+        <h1 id="foto-titulo">Fotografia do rascunho</h1>
+        <p>Você pode adicionar uma fotografia ao seu rascunho. O anúncio continuará sem publicação.</p>
+        {% if mensagem %}<p class="registration-message" role="alert">{{ mensagem }}</p>{% endif %}
+        {% if form %}
+        <form method="post" action="{{ url_for('adicionar_foto', animal_id=animal_id) }}" enctype="multipart/form-data">
+            {{ form.csrf_token }}
+            <div class="registration-field">
+                {{ form.foto.label }}
+                {{ form.foto(aria_describedby='foto-ajuda' ~ (' foto-erro' if form.foto.errors else ''), aria_invalid='true' if form.foto.errors else 'false', required=true) }}
+                <small id="foto-ajuda">Uma fotografia JPEG, PNG ou WebP, estática, de até 3 MiB. Após corrigir erros, selecione a fotografia novamente.</small>
+                {% if form.foto.errors %}<p id="foto-erro" class="field-error" role="alert">{{ form.foto.errors | join(' ') }}</p>{% endif %}
+            </div>
+            <button class="button" type="submit">Adicionar fotografia</button>
+        </form>
+        {% endif %}
+        <p><a class="text-link" href="{{ url_for('minha_conta') }}">Voltar à minha conta</a></p>
+    </div>
+</section>
+{% endblock %}
