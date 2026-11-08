@@ -1,6 +1,6 @@
 -- PENDENTE no Supabase. Executar somente após revisão/autorização, em ambiente
 -- descartável, na mesma conexão privilegiada, com as migrações de animais,
--- fotografias e 202611070001_fix_animal_fotos_storage_leitura.sql aplicadas.
+-- fotografias, correção de leitura e 202611080002_publicar_anuncio.sql aplicadas.
 -- Como animais_rls.sql: BEGIN, fixtures, SET LOCAL ROLE/claims e ROLLBACK.
 -- Este roteiro acrescenta asserções: qualquer divergência gera erro; interromper
 -- e executar ROLLBACK. Não executar com service_role como se fosse cliente.
@@ -307,6 +307,14 @@ select pg_temp.fotos_assert(not pg_temp.fotos_storage('animal_fotos_storage_atua
 select set_config('storage.operation', 'object.delete_many', true);
 select pg_temp.fotos_assert(not pg_temp.fotos_storage('animal_fotos_storage_exclusao',
     current_setting('adotae.foto_caminho_pronta')), 'pronta não removível antes da solicitação');
+select pg_temp.fotos_erro(format('update public.animal_fotos set estado = ''removendo'' where id = %L',
+    current_setting('adotae.foto_pronta_a')), '42501');
+-- A remoção agora exige rascunho. Somente fixture privilegiada retorna este
+-- anúncio ao estado anterior para preservar os testes de remoção/Storage abaixo.
+reset role;
+update public.animais set status_publicacao = 'rascunho'
+where id = current_setting('adotae.foto_publico_a')::uuid;
+set local role authenticated;
 update public.animal_fotos set estado = 'removendo'
 where id = current_setting('adotae.foto_pronta_a')::uuid;
 update public.animal_fotos set estado = 'removendo'

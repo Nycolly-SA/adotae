@@ -1,5 +1,95 @@
 # Banco de dados — etapa SQL
 
+## Publicação direta — validada em adotae-testes
+
+A migração [202611080002_publicar_anuncio.sql](migrations/202611080002_publicar_anuncio.sql)
+acrescenta `public.publicar_anuncio(p_animal_id uuid)`, sem botão ou rota Flask.
+Foi aplicada com sucesso no Supabase **adotae-testes em 08/11/2026**,
+com as verificações de instalação e permissões da RPC aprovadas, conforme os
+resultados informados. Em novas instalações, executar somente após as migrações
+anteriores e revisão. O bucket `animal-fotos` permanece privado e suas políticas/grants não mudam.
+
+A entrada pública é `SECURITY INVOKER` e delega à auxiliar `SECURITY DEFINER`
+em `adotae_private`, fora dos schemas expostos. Ambas pertencem a `postgres`,
+têm `search_path` vazio e EXECUTE concedido explicitamente a `authenticated`,
+revogado de PUBLIC, `anon` e `service_role`. A auxiliar também valida chamadas
+SQL diretas: identidade por `auth.uid()`, e-mail confirmado em
+`auth.users.email_confirmed_at`, propriedade, estado `rascunho`, disponibilidade,
+ausência de ocultação, contato e foto `pronta`. Os CHECKs existentes validam o
+formato dos contatos. Exige objeto em `animal-fotos` com `owner_id` correspondente
+e caminho exato `<usuario_id>/<animal_id>/<foto_id>.webp`.
+
+A única alteração explícita no animal é `status_publicacao='publicado'`; o
+trigger existente atualiza a data e mantém a proteção dos anúncios publicados.
+Não há UPDATE direto desse campo para usuários comuns; a migração aborta se
+detectar privilégios efetivos divergentes. Retorna `void` em sucesso. Ausência,
+falta de autorização ou condição não atendida geram `42501`, sem distinguir
+anúncio alheio de inexistente. Repetir a chamada após sucesso também gera `42501`
+sem alterar a linha: a transição aceita exclusivamente rascunhos. Uma disputa de
+locks retorna `55P03` sem publicar; uma nova chamada após encerrar a disputa
+revalida todas as condições. Não há repetição automática dentro da função.
+
+Bloqueios seguem **auth.users → fotos → animal → objeto**: todas as reservas existentes são
+bloqueadas por ID em ordem crescente, depois o animal com `NO KEY UPDATE` e o
+objeto comprovante com `SHARE`, até o fim da transação. Apenas os IDs efetivamente
+bloqueados podem comprovar a publicação. Reservas criadas durante a operação podem
+exigir nova chamada. Todos os locks da publicação usam `NOWAIT`, inclusive o da
+conta Auth, para abortar imediatamente em disputa. Isso impede ciclos com UPDATEs
+de remoção em lote, cuja ordem de visita das fotos não é controlada pela RPC.
+A confirmação é redefinida na nova migração para bloquear
+explicitamente foto antes de animal, revalidando propriedade e estado após esperar,
+sem alterar suas demais regras. O novo trigger invoker de fotografias bloqueia o
+animal com `SHARE` antes de permitir UPDATE em rascunhos. Assim, remoção primeiro
+faz a publicação concorrente recusar o lock e uma nova chamada reavaliar a foto;
+publicação primeiro faz a remoção esperar e falhar após o COMMIT da publicação.
+Fotos pendentes de anúncios publicados também não podem ir para `removendo`.
+Operações confiáveis de `postgres`/`service_role` preservam seus controles anteriores.
+
+Os [testes de publicação](tests/test_publicacao_local.py) executam SQL real em
+PostgreSQL local descartável, reutilizando a infraestrutura e regressões das
+fotografias. Cobrem autorizações, pré-condições, vínculo do objeto, grants,
+repetição, proteção de fotos e concorrência com confirmação, remoção, outra
+publicação, nova reserva após conflito e remoção com duas fotos em ordem inversa.
+O teste desta última reproduziu `40P01` antes da correção com `NOWAIT`.
+O roteiro de Storage foi adaptado somente
+para exigir bloqueio da remoção em publicado e usar fixture privilegiada em
+rascunho nos cenários posteriores de remoção.
+
+Validação local em 08/11/2026, conforme os resultados informados:
+**39 testes SQL de integração** aprovados no PostgreSQL 18
+(incluindo regressões herdadas), **180 testes Python** aprovados e
+`git diff --check` sem erros.
+
+Na validação remota em **adotae-testes em 08/11/2026**, conforme os resultados
+informados, um usuário autenticado publicou seu próprio rascunho pela RPC
+`publicar_anuncio`. Uma consulta confirmou o status `publicado`; a fotografia
+permaneceu `pronta`, com o objeto presente no Storage. Uma tentativa de alterar
+o estado da fotografia para `removendo`, usando a sessão do proprietário,
+foi recusada com `42501`. Uma nova consulta confirmou que a fotografia
+permaneceu `pronta`.
+
+Esses testes remotos foram **funcionais e pontuais**, não uma reexecução integral
+da suíte SQL local.
+
+Com o servidor descartável local já iniciado conforme a seção de testes abaixo:
+
+```powershell
+$env:ADOTAE_TEST_LOCAL_PG = '1'
+.\.venv\Scripts\python.exe -m unittest discover -s supabase/tests -p 'test_*local.py' -v
+Remove-Item Env:ADOTAE_TEST_LOCAL_PG
+.\.venv\Scripts\python.exe -m unittest discover -v
+git diff --check
+```
+
+Limites: Auth e Storage são simulados no banco local; não certificam o serviço
+Supabase implantado, a API ou a existência dos bytes físicos. O SQL confere o
+catálogo do Storage e o estado da reserva, sem decodificar novamente a imagem.
+A preservação da foto vale para os usuários comuns; operadores privilegiados
+continuam responsáveis por suas intervenções. As operações isoladas seguem a
+mesma ordem de locks; transações SQL externas que combinem operações em ordem
+inversa ainda precisam tratar deadlock/serialização. Nenhuma integração do
+catálogo ou leitura pública de fotos foi implementada nesta etapa.
+
 ## Proteção da edição de anúncios publicados — validada em adotae-testes
 
 A migração [202611080001_protect_animais_edicao.sql](migrations/202611080001_protect_animais_edicao.sql)

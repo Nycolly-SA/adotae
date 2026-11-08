@@ -60,8 +60,8 @@ BOOTSTRAP = f"""
 create schema auth;
 create schema storage;
 grant usage on schema auth,storage to anon,authenticated,service_role;
-create table auth.users(id uuid primary key);
-insert into auth.users values ('{A}'),('{B}');
+create table auth.users(id uuid primary key, email_confirmed_at timestamptz);
+insert into auth.users values ('{A}',now()),('{B}',now());
 create function auth.uid() returns uuid language sql stable as $$
 select coalesce(nullif(current_setting('request.jwt.claim.sub',true),''),
 nullif(current_setting('request.jwt.claims',true),'')::jsonb->>'sub')::uuid;
@@ -125,6 +125,7 @@ class FotosSQLLocal(unittest.TestCase):
         cls.execute((ROOT / "supabase/migrations/202611070001_fix_animal_fotos_storage_leitura.sql").read_text(encoding="utf-8"))
         cls.fotos_before = cls.fotos_metadata()
         cls.execute((ROOT / "supabase/migrations/202611080001_protect_animais_edicao.sql").read_text(encoding="utf-8"))
+        cls.execute((ROOT / "supabase/migrations/202611080002_publicar_anuncio.sql").read_text(encoding="utf-8"))
 
     @classmethod
     def fotos_metadata(cls):
@@ -259,7 +260,7 @@ class FotosSQLLocal(unittest.TestCase):
         self.run_case(f"update public.animal_fotos set estado='pronta' where id='{self.foto}';"
                       + claims() + self.erro("P0001"))
 
-    def concorrer(self, primeira, segunda):
+    def concorrer(self, primeira, segunda, antes_commit="", segunda_pode_recusar=False):
         # Duas conexões de trabalho; a conexão observadora só consulta atividade.
         # A primeira mantém a transação aberta até comprovar que bloqueia a segunda.
         application = "fotos_lock_" + uuid.uuid4().hex
@@ -282,10 +283,12 @@ class FotosSQLLocal(unittest.TestCase):
             second.stdin.flush()
             deadline = time.monotonic() + 10
             while self.execute(f"select count(*) from pg_stat_activity where application_name='{application}' and wait_event_type='Lock';") != "1":
+                if segunda_pode_recusar and second.poll() is not None:
+                    break
                 if time.monotonic() > deadline:
                     self.fail("Segunda conexão não aguardou o bloqueio concorrente")
                 time.sleep(0.05)
-            _, first_err = first.communicate("commit;\n", timeout=10)
+            _, first_err = first.communicate(antes_commit + "commit;\n", timeout=10)
             self.assertEqual(first.returncode, 0, first_err)
             _, second_err = second.communicate(timeout=10)
             self.assertNotIn("40P01", second_err, "Deadlock entre as operações")
@@ -318,7 +321,7 @@ class FotosSQLLocal(unittest.TestCase):
         # SHARE protege também colunas não chave: KEY SHARE seria insuficiente
         # contra alteração de status_publicacao. Propriedade é revalidada após espera.
         # A FK da reserva usa KEY SHARE, compatível com SHARE. A solicitação de
-        # remoção bloqueia a foto e apenas lê o animal (concorrência testada acima).
+        # remoção bloqueia a foto e depois o animal com SHARE (testada acima).
         # Os UPDATEs de campos protegidos são fixtures do operador postgres LOCAL;
         # não implementam publicação/transferência nem concedem esses direitos ao usuário.
         for campo in ["status_publicacao", "usuario_id"]:

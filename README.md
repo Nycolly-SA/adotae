@@ -46,8 +46,10 @@ O catálogo continua demonstrativo, sem integração ao banco.
 Consulte [supabase/README.md](supabase/README.md) para os arquivos e limites.
 Habilitar tabelas na Data API pode alterar privilégios SQL e exige nova auditoria.
 A leitura pública permite expor `usuario_id`; essa decisão precisa de revisão
-antes da API pública definitiva. Publicação e moderação ainda não têm mecanismo
-implementado.
+antes da API pública definitiva. A migração SQL de publicação direta foi aplicada
+e validada em `adotae-testes` em 08/11/2026, com testes remotos funcionais e pontuais,
+sem reexecução integral da suíte SQL local. Ainda não há botão ou rota Flask.
+Moderação continua pendente.
 
 O módulo `app/fotos.py` oferece `processar_foto(arquivo)` para um `FileStorage`
 do Flask, retornando `FotoProcessada` com `conteudo` (bytes), `content_type`,
