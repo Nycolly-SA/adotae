@@ -42,15 +42,30 @@ class LoginTests(unittest.TestCase):
         self.name = "Ana"
         self.access = jwt()
         self.refresh = "private-refresh-token"
+        self.identity_id = user()["id"]
+        self.list_result = []
+        self.list_failure = None
 
         def transport(request):
             self.calls.append(request)
+            if request.url.path == "/rest/v1/animais":
+                if self.list_failure == "network":
+                    raise httpx.ConnectError("private " + self.access)
+                if self.list_failure == "invalid-json":
+                    return httpx.Response(200, text="invalid json " + self.refresh)
+                if self.list_failure:
+                    return httpx.Response(self.list_failure, json=dict(
+                        code="42501", message="private " + self.access,
+                        details=self.refresh, hint="sb_publishable_test"))
+                return httpx.Response(200, content=json.dumps(self.list_result),
+                                      headers={"Content-Type": "application/json"})
             if self.failure:
                 status, code = self.failure
                 return httpx.Response(status, json={"msg": "private provider details", "code": code},
                                       headers={"X-Supabase-Api-Version": "2024-01-01"})
             if request.url.path.endswith("/user"):
-                return httpx.Response(200, json=user(self.name, self.confirmed))
+                return httpx.Response(200, json=dict(
+                    user(self.name, self.confirmed), id=self.identity_id))
             if request.url.path.endswith("/logout"):
                 if self.logout_failure:
                     raise httpx.ConnectError("private network details")
@@ -312,6 +327,147 @@ class LoginTests(unittest.TestCase):
             response = self.client.get("/login")
             self.assertEqual(response.status_code, 503)
             self.assertNotIn('name="senha"', response.text)
+
+    def list_requests(self):
+        return [r for r in self.calls if r.url.path == "/rest/v1/animais"]
+
+    def test_account_list_requires_authenticated_confirmed_identity(self):
+        self.assertEqual(self.client.get("/minha-conta").location, "/login")
+        self.assertEqual(self.calls, [])
+        self.cookies()
+        self.confirmed = False
+        self.assertEqual(self.client.get("/minha-conta").location, "/login")
+        self.confirmed = True
+        self.cookies()
+        self.failure = (401, "bad_jwt")
+        self.assertEqual(self.client.get("/minha-conta").location, "/login")
+        self.assertEqual(self.list_requests(), [])
+
+    def test_account_list_query_uses_owner_session_and_creation_order(self):
+        self.cookies()
+        response = self.client.get("/minha-conta?usuario_id=forged")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(self.list_requests()), 1)
+        query = self.list_requests()[0]
+        self.assertEqual(query.method, "GET")
+        self.assertEqual(dict(query.url.params), dict(
+            select="nome,especie,distrito,status_publicacao",
+            usuario_id="eq.00000000-0000-0000-0000-000000000001",
+            order="criado_em.desc"))
+        self.assertEqual(query.headers["accept-profile"], "public")
+        self.assertEqual(query.headers["authorization"], f"Bearer {self.access}")
+        self.assertEqual(query.headers["apikey"], "sb_publishable_test")
+        self.assertEqual(len(self.clients), 1)
+
+    def test_account_lists_are_isolated_between_users(self):
+        self.cookies()
+        self.list_result = [dict(nome="Fubá", especie="Cachorro", distrito="Grussaí",
+                                 status_publicacao="rascunho")]
+        first = self.client.get("/minha-conta")
+        other = app.test_client()
+        other_access = jwt("bia")
+        self.cookies(access=other_access, client=other)
+        self.identity_id = "00000000-0000-0000-0000-000000000002"
+        self.list_result = [dict(nome="Luna", especie="Gato", distrito="Atafona",
+                                 status_publicacao="publicado")]
+        second = other.get("/minha-conta")
+        self.assertIn("Fubá", first.text)
+        self.assertNotIn("Luna", first.text)
+        self.assertIn("Luna", second.text)
+        self.assertNotIn("Fubá", second.text)
+        queries = self.list_requests()
+        self.assertEqual(len(queries), 2)
+        self.assertEqual(queries[0].url.params["usuario_id"],
+                         "eq.00000000-0000-0000-0000-000000000001")
+        self.assertEqual(queries[1].url.params["usuario_id"],
+                         "eq.00000000-0000-0000-0000-000000000002")
+        self.assertEqual(queries[0].headers["authorization"], f"Bearer {self.access}")
+        self.assertEqual(queries[1].headers["authorization"], f"Bearer {other_access}")
+        self.assertEqual(len(self.clients), 2)
+
+    def test_account_list_uses_refreshed_token(self):
+        self.cookies(access=jwt(expired=True), refresh="old-refresh")
+        response = self.client.get("/minha-conta")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(self.list_requests()), 1)
+        self.assertEqual(self.list_requests()[0].headers["authorization"], f"Bearer {self.access}")
+        self.assertEqual(self.client.get_cookie("adotae_access").value, self.access)
+
+    def test_account_list_displays_fields_statuses_and_response_order(self):
+        self.cookies()
+        self.list_result = [
+            dict(nome="Fubá", especie="Cachorro", distrito="Grussaí", status_publicacao="rascunho"),
+            dict(nome="Luna", especie="Gato", distrito="Atafona", status_publicacao="publicado"),
+        ]
+        page = self.client.get("/minha-conta")
+        self.assertEqual(page.status_code, 200)
+        for text in ("Meus anúncios", "Fubá", "Cachorro", "Grussaí", "Rascunho",
+                     "Luna", "Gato", "Atafona", "Publicado", "Olá, Ana"):
+            self.assertIn(text, page.text)
+        self.assertLess(page.text.index("Fubá"), page.text.index("Luna"))
+        self.assertIn('href="/anunciar"', page.text)
+        self.assertIn('action="/logout"', page.text)
+        self.assertNotIn("Você ainda não cadastrou nenhum animal.", page.text)
+        self.assertEqual(page.headers["Cache-Control"], "no-store")
+
+    def test_account_empty_list_is_friendly(self):
+        self.cookies()
+        page = self.client.get("/minha-conta")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn("Você ainda não cadastrou nenhum animal.", page.text)
+        self.assertNotIn("Não foi possível carregar seus anúncios", page.text)
+
+    def assert_list_unavailable(self, page):
+        self.assertEqual(page.status_code, 503)
+        self.assertIn("Não foi possível carregar seus anúncios", page.text)
+        self.assertNotIn("Você ainda não cadastrou nenhum animal.", page.text)
+        self.assertIn("Olá, Ana", page.text)
+        self.assertIn('href="/anunciar"', page.text)
+        self.assertIn('action="/logout"', page.text)
+        self.assertIn('name="csrf_token"', page.text)
+        self.assertEqual(page.headers["Cache-Control"], "no-store")
+        for secret in (self.access, self.refresh, "sb_publishable_test", "private"):
+            self.assertNotIn(secret, page.text)
+
+    def test_account_list_api_failures_preserve_account_and_logout(self):
+        self.cookies()
+        for failure in (401, 403, 429, 500, "network", "invalid-json"):
+            with self.subTest(failure=failure):
+                self.list_failure = failure
+                page = self.client.get("/minha-conta")
+                self.assert_list_unavailable(page)
+                token = re.search(r'name="csrf_token"[^>]*value="([^"]+)"', page.text).group(1)
+                response = self.client.post("/logout", data={"csrf_token": token})
+                self.assertEqual(response.location, "/login")
+                self.assertIsNone(self.client.get_cookie("adotae_access"))
+                self.cookies()
+
+    def test_account_list_rejects_unexpected_responses_without_partial_data(self):
+        self.cookies()
+        valid = dict(nome="Não exibir lista parcial", especie="Gato", distrito="Atafona",
+                     status_publicacao="rascunho")
+        invalid_rows = [None, "animal", {}, dict(valid, nome=None), dict(valid, nome=[]),
+                        dict(valid, nome=" "), dict(valid, especie=42), dict(valid, distrito={}),
+                        dict(valid, status_publicacao="oculto"), dict(valid, status_publicacao=None)]
+        for result in (None, {}, {"data": []}, "unexpected", *([valid, row] for row in invalid_rows)):
+            with self.subTest(result=result):
+                self.list_result = result
+                page = self.client.get("/minha-conta")
+                self.assert_list_unavailable(page)
+                self.assertNotIn("Não exibir lista parcial", page.text)
+
+    def test_account_list_escapes_text_and_does_not_expose_credentials(self):
+        self.cookies()
+        self.list_result = [dict(nome="<script>animal</script>", especie='<b>Gato</b>',
+                                 distrito='<img src=x onerror="alert(1)">', status_publicacao="rascunho")]
+        page = self.client.get("/minha-conta")
+        self.assertEqual(page.status_code, 200)
+        for escaped in ("&lt;script&gt;animal&lt;/script&gt;", "&lt;b&gt;Gato&lt;/b&gt;",
+                        "&lt;img src=x onerror=&#34;alert(1)&#34;&gt;"):
+            self.assertIn(escaped, page.text)
+        for raw in ("<script>animal</script>", "<b>Gato</b>", '<img src=x',
+                    self.access, self.refresh, "sb_publishable_test"):
+            self.assertNotIn(raw, page.text)
 
 
 if __name__ == "__main__":

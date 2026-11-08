@@ -63,6 +63,8 @@ class AnunciarTests(unittest.TestCase):
                     return httpx.Response(204)
                 return httpx.Response(200, json=[dict(self.photo_result[0], estado=self.photo_state)])
             if request.url.path == "/rest/v1/animais":
+                if request.method == "GET":
+                    return httpx.Response(200, json=[])
                 if self.api_failure == "network":
                     raise httpx.ConnectError("private network details " + self.access)
                 if self.api_failure:
@@ -113,7 +115,7 @@ class AnunciarTests(unittest.TestCase):
         return data
 
     def inserts(self):
-        return [r for r in self.calls if r.url.path == "/rest/v1/animais"]
+        return [r for r in self.calls if r.url.path == "/rest/v1/animais" and r.method == "POST"]
 
     def photo_requests(self):
         return [r for r in self.calls if "animal_fotos" in r.url.path

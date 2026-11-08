@@ -10,6 +10,27 @@
         <p class="registration-message" role="{{ 'alert' if categoria == 'rascunho-aviso' else 'status' }}">{{ mensagem }}</p>
         {% endfor %}
         <p><a class="text-link" href="{{ url_for('anunciar') }}">Anunciar animal</a></p>
+        <section class="account-list" aria-labelledby="anuncios-titulo">
+            <h2 id="anuncios-titulo">Meus anúncios</h2>
+            {% if anuncios is none %}
+            <p class="registration-message" role="alert">Não foi possível carregar seus anúncios agora. Tente novamente mais tarde.</p>
+            {% elif anuncios %}
+            <ul class="account-animals">
+                {% for animal in anuncios %}
+                <li>
+                    <h3>{{ animal.nome }}</h3>
+                    <dl class="animal-facts">
+                        <div><dt>Espécie</dt><dd>{{ animal.especie }}</dd></div>
+                        <div><dt>Distrito</dt><dd>{{ animal.distrito }}</dd></div>
+                        <div><dt>Status de publicação</dt><dd>{{ 'Rascunho' if animal.status_publicacao == 'rascunho' else 'Publicado' }}</dd></div>
+                    </dl>
+                </li>
+                {% endfor %}
+            </ul>
+            {% else %}
+            <p>Você ainda não cadastrou nenhum animal.</p>
+            {% endif %}
+        </section>
         <form method="post" action="{{ url_for('logout') }}">
             {{ form.csrf_token }}
             <button class="button" type="submit">Sair</button>

@@ -147,6 +147,11 @@ h1, h2 { font-family: var(--heading-font); font-weight: 400; letter-spacing: -.0
 .registration-field textarea { resize: vertical; }
 .registration-field small { color: var(--muted); }
 .registration-message { padding: 16px; background: var(--sage-light); border-radius: 8px; overflow-wrap: anywhere; }
+.account-list { margin-block: 24px; overflow-wrap: anywhere; }
+.account-animals { list-style: none; padding: 0; }
+.account-animals li { padding-block: 16px; border-top: 1px solid var(--border); }
+.account-animals h3 { margin: 0 0 12px; }
+.account-animals .animal-facts { flex-wrap: wrap; margin-bottom: 0; }
 .confirmation-notice { padding-top: 20px; font-size: 14px; }
 .confirmation-notice .registration-message { margin: 0; }
 .field-error { margin: 0; font-size: 14px; font-weight: 600; }

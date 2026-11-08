@@ -6,6 +6,7 @@ import re
 from flask import current_app, flash, g, redirect, render_template, request, session, url_for
 from flask_wtf import FlaskForm
 from httpx import HTTPError
+from postgrest.exceptions import APIError
 from supabase import AuthApiError, AuthError, ClientOptions, SupabaseException, create_client
 from supabase_auth.errors import AuthRetryableError
 
@@ -176,7 +177,26 @@ def registrar_auth(app):
             return render_template("login.html", indisponivel=True, mensagem=INDISPONIVEL), 503
         if not g.usuario:
             return redirect(url_for("login"))
-        return render_template("minha_conta.html", form=FlaskForm())
+        anuncios = None
+        try:
+            registros = (g.auth_cliente.table("animais")
+                         .select("nome,especie,distrito,status_publicacao")
+                         .eq("usuario_id", g.usuario.id)
+                         .order("criado_em", desc=True).execute().data)
+            # Só apresentar a lista quando todos os registros forem válidos.
+            if not isinstance(registros, list) or any(
+                not isinstance(animal, dict)
+                or any(not isinstance(animal.get(campo), str) or not animal[campo].strip()
+                       for campo in ("nome", "especie", "distrito"))
+                or animal.get("status_publicacao") not in ("rascunho", "publicado")
+                for animal in registros
+            ):
+                raise ValueError("Resposta de listagem inválida")
+            anuncios = registros
+        except (APIError, HTTPError, SupabaseException, ValueError, TypeError):
+            pass
+        return render_template("minha_conta.html", form=FlaskForm(), anuncios=anuncios), (
+            503 if anuncios is None else 200)
 
     @app.post("/logout")
     def logout():
