@@ -2,6 +2,7 @@
 
 import logging
 import re
+from uuid import UUID
 
 from flask import current_app, flash, g, redirect, render_template, request, session, url_for
 from flask_wtf import FlaskForm
@@ -98,7 +99,7 @@ def registrar_auth(app):
             # Cookies de navegador: a validade efetiva é controlada pelo Supabase.
             response.set_cookie(ACCESS_COOKIE, g.auth_tokens.access_token, **opcoes)
             response.set_cookie(REFRESH_COOKIE, g.auth_tokens.refresh_token, **opcoes)
-        if (request.endpoint in ("login", "minha_conta", "logout", "cadastro", "confirmar_email", "anunciar")
+        if (request.endpoint in ("login", "minha_conta", "logout", "cadastro", "confirmar_email", "anunciar", "editar_anuncio")
                 or session.modified
                 or request.cookies.get(ACCESS_COOKIE) or request.cookies.get(REFRESH_COOKIE)
                 or getattr(g, "auth_tokens", None)):
@@ -180,18 +181,21 @@ def registrar_auth(app):
         anuncios = None
         try:
             registros = (g.auth_cliente.table("animais")
-                         .select("nome,especie,distrito,status_publicacao")
+                         .select("id,nome,especie,distrito,status_publicacao")
                          .eq("usuario_id", g.usuario.id)
                          .order("criado_em", desc=True).execute().data)
             # Só apresentar a lista quando todos os registros forem válidos.
             if not isinstance(registros, list) or any(
                 not isinstance(animal, dict)
+                or not isinstance(animal.get("id"), str)
                 or any(not isinstance(animal.get(campo), str) or not animal[campo].strip()
                        for campo in ("nome", "especie", "distrito"))
                 or animal.get("status_publicacao") not in ("rascunho", "publicado")
                 for animal in registros
             ):
                 raise ValueError("Resposta de listagem inválida")
+            for animal in registros:
+                animal["id"] = str(UUID(animal.get("id")))
             anuncios = registros
         except (APIError, HTTPError, SupabaseException, ValueError, TypeError):
             pass

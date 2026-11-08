@@ -24,6 +24,9 @@
                         <div><dt>Distrito</dt><dd>{{ animal.distrito }}</dd></div>
                         <div><dt>Status de publicação</dt><dd>{{ 'Rascunho' if animal.status_publicacao == 'rascunho' else 'Publicado' }}</dd></div>
                     </dl>
+                    {% if animal.status_publicacao == 'rascunho' %}
+                    <a class="text-link" href="{{ url_for('editar_anuncio', animal_id=animal.id) }}">Editar</a>
+                    {% endif %}
                 </li>
                 {% endfor %}
             </ul>

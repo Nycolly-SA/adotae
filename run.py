@@ -41,7 +41,7 @@ def verificar_configuracao_csrf():
     if request.endpoint == "anunciar":
         # Uma imagem de até 3 MiB mais campos e envelope multipart.
         request.max_content_length = 4 * 1024 * 1024
-    if request.endpoint in ("login", "minha_conta", "logout", "anunciar") and not app.secret_key:
+    if request.endpoint in ("login", "minha_conta", "logout", "anunciar", "editar_anuncio") and not app.secret_key:
         return render_template("login.html", indisponivel=True,
                                mensagem="Acesso à conta indisponível no momento. Tente novamente mais tarde."), 503
     if request.endpoint == "cadastro" and not app.secret_key:
@@ -61,6 +61,10 @@ def arquivo_grande(error):
 
 @app.errorhandler(CSRFError)
 def erro_csrf(error):
+    if request.endpoint == "editar_anuncio":
+        return render_template("anunciar.html", form=AnimalForm(OPCOES_FILTROS),
+                               edicao=True, animal_id=request.view_args["animal_id"],
+                               mensagem="Não foi possível validar o formulário. Recarregue a página e tente novamente."), 400
     if request.endpoint == "anunciar":
         return render_template("anunciar.html", form=AnimalForm(OPCOES_FILTROS),
                                mensagem="Não foi possível validar o formulário. Recarregue a página e tente novamente."), 400
@@ -169,6 +173,68 @@ OPCOES_FILTROS = {
     "porte": ("Pequeno", "Médio", "Grande"),
     "distrito": ("São João da Barra (sede)", "Atafona", "Grussaí", "Cajueiro", "Pipeiras", "Barcelos"),
 }
+
+
+@app.route("/anuncios/<uuid:animal_id>/editar", methods=["GET", "POST"])
+def editar_anuncio(animal_id):
+    contexto = dict(edicao=True, animal_id=animal_id)
+    if g.auth_indisponivel:
+        return render_template("anunciar.html", **contexto, indisponivel=True, mensagem=INDISPONIVEL), 503
+    if not g.usuario:
+        return redirect(url_for("login"))
+    form = AnimalForm(OPCOES_FILTROS)
+    campos = tuple(form.dados_insert())
+    mensagem = "Não foi possível carregar o rascunho agora. Tente novamente mais tarde."
+    try:
+        registros = (g.auth_cliente.table("animais")
+                     .select(",".join(("id", "usuario_id", "status_publicacao", *campos)))
+                     .eq("id", str(animal_id)).eq("usuario_id", str(g.usuario.id))
+                     .eq("status_publicacao", "rascunho").execute().data)
+        if registros == []:
+            abort(404)
+        if not isinstance(registros, list) or len(registros) != 1 or not isinstance(registros[0], dict):
+            raise ValueError("Resposta de leitura inválida")
+        animal = registros[0]
+        if any(campo not in animal for campo in ("id", "usuario_id", "status_publicacao")):
+            raise ValueError("Identificação de rascunho ausente")
+        if (animal.get("id") != str(animal_id) or animal.get("usuario_id") != str(g.usuario.id)
+                or animal.get("status_publicacao") != "rascunho"):
+            abort(404)
+        opcionais = ("especie_outro", "bairro", "email_contato", "whatsapp")
+        if any(campo not in animal or (
+                not isinstance(animal[campo], str)
+                and not (campo in opcionais and animal[campo] is None)) for campo in campos):
+            raise ValueError("Dados de rascunho inválidos")
+    except (APIError, HTTPError, SupabaseException, ValueError, TypeError):
+        return render_template("anunciar.html", **contexto, indisponivel=True, mensagem=mensagem), 503
+    if request.method == "GET":
+        form = AnimalForm(OPCOES_FILTROS, formdata=None, data=animal)
+        return render_template("anunciar.html", **contexto, form=form)
+    if not form.validate_on_submit():
+        return render_template("anunciar.html", **contexto, form=form), 400
+    dados = form.dados_insert()
+    mensagem = ("Não foi possível confirmar a atualização do rascunho. "
+                "Confira seus anúncios antes de tentar novamente.")
+    try:
+        # A condição também no UPDATE protege contra publicação, remoção ou
+        # mudança de proprietário entre a leitura e a gravação.
+        registros = (g.auth_cliente.table("animais").update(dados)
+                     .eq("id", str(animal_id)).eq("usuario_id", str(g.usuario.id))
+                     .eq("status_publicacao", "rascunho").execute().data)
+        if registros == []:
+            return render_template("anunciar.html", **contexto, form=form, mensagem=(
+                "O rascunho não pôde ser atualizado. Volte à sua conta e confira se ele ainda está disponível para edição.")), 409
+        if not isinstance(registros, list) or len(registros) != 1 or not isinstance(registros[0], dict):
+            raise ValueError("Resposta de UPDATE inválida")
+        atualizado = registros[0]
+        if (atualizado.get("id") != str(animal_id) or atualizado.get("usuario_id") != str(g.usuario.id)
+                or atualizado.get("status_publicacao") != "rascunho"
+                or any(campo not in atualizado or atualizado[campo] != valor for campo, valor in dados.items())):
+            raise ValueError("Atualização não confirmada")
+    except (APIError, HTTPError, SupabaseException, ValueError, TypeError):
+        return render_template("anunciar.html", **contexto, form=form, mensagem=mensagem), 503
+    flash("Rascunho atualizado com sucesso!", "rascunho-sucesso")
+    return redirect(url_for("minha_conta"))
 
 
 @app.route("/anunciar", methods=["GET", "POST"])

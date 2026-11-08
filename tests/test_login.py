@@ -351,7 +351,7 @@ class LoginTests(unittest.TestCase):
         query = self.list_requests()[0]
         self.assertEqual(query.method, "GET")
         self.assertEqual(dict(query.url.params), dict(
-            select="nome,especie,distrito,status_publicacao",
+            select="id,nome,especie,distrito,status_publicacao",
             usuario_id="eq.00000000-0000-0000-0000-000000000001",
             order="criado_em.desc"))
         self.assertEqual(query.headers["accept-profile"], "public")
@@ -361,14 +361,14 @@ class LoginTests(unittest.TestCase):
 
     def test_account_lists_are_isolated_between_users(self):
         self.cookies()
-        self.list_result = [dict(nome="Fubá", especie="Cachorro", distrito="Grussaí",
+        self.list_result = [dict(id="00000000-0000-0000-0000-000000000010", nome="Fubá", especie="Cachorro", distrito="Grussaí",
                                  status_publicacao="rascunho")]
         first = self.client.get("/minha-conta")
         other = app.test_client()
         other_access = jwt("bia")
         self.cookies(access=other_access, client=other)
         self.identity_id = "00000000-0000-0000-0000-000000000002"
-        self.list_result = [dict(nome="Luna", especie="Gato", distrito="Atafona",
+        self.list_result = [dict(id="00000000-0000-0000-0000-000000000010", nome="Luna", especie="Gato", distrito="Atafona",
                                  status_publicacao="publicado")]
         second = other.get("/minha-conta")
         self.assertIn("Fubá", first.text)
@@ -396,8 +396,8 @@ class LoginTests(unittest.TestCase):
     def test_account_list_displays_fields_statuses_and_response_order(self):
         self.cookies()
         self.list_result = [
-            dict(nome="Fubá", especie="Cachorro", distrito="Grussaí", status_publicacao="rascunho"),
-            dict(nome="Luna", especie="Gato", distrito="Atafona", status_publicacao="publicado"),
+            dict(id="00000000-0000-0000-0000-000000000010", nome="Fubá", especie="Cachorro", distrito="Grussaí", status_publicacao="rascunho"),
+            dict(id="00000000-0000-0000-0000-000000000010", nome="Luna", especie="Gato", distrito="Atafona", status_publicacao="publicado"),
         ]
         page = self.client.get("/minha-conta")
         self.assertEqual(page.status_code, 200)
@@ -444,9 +444,10 @@ class LoginTests(unittest.TestCase):
 
     def test_account_list_rejects_unexpected_responses_without_partial_data(self):
         self.cookies()
-        valid = dict(nome="Não exibir lista parcial", especie="Gato", distrito="Atafona",
+        valid = dict(id="00000000-0000-0000-0000-000000000010", nome="Não exibir lista parcial", especie="Gato", distrito="Atafona",
                      status_publicacao="rascunho")
-        invalid_rows = [None, "animal", {}, dict(valid, nome=None), dict(valid, nome=[]),
+        invalid_rows = [None, "animal", {}, dict(valid, id=None), dict(valid, id=[]),
+                        dict(valid, id="invalid"), dict(valid, nome=None), dict(valid, nome=[]),
                         dict(valid, nome=" "), dict(valid, especie=42), dict(valid, distrito={}),
                         dict(valid, status_publicacao="oculto"), dict(valid, status_publicacao=None)]
         for result in (None, {}, {"data": []}, "unexpected", *([valid, row] for row in invalid_rows)):
@@ -458,7 +459,7 @@ class LoginTests(unittest.TestCase):
 
     def test_account_list_escapes_text_and_does_not_expose_credentials(self):
         self.cookies()
-        self.list_result = [dict(nome="<script>animal</script>", especie='<b>Gato</b>',
+        self.list_result = [dict(id="00000000-0000-0000-0000-000000000010", nome="<script>animal</script>", especie='<b>Gato</b>',
                                  distrito='<img src=x onerror="alert(1)">', status_publicacao="rascunho")]
         page = self.client.get("/minha-conta")
         self.assertEqual(page.status_code, 200)

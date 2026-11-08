@@ -91,7 +91,7 @@ class AnimalForm(FlaskForm):
         return valid
 
     def dados_insert(self):
-        # Lista explícita das únicas colunas concedidas pelo GRANT de INSERT.
+        # Campos do formulário permitidos no INSERT e na edição do rascunho.
         return {name: self[name].data for name in (
             "nome", "especie", "especie_outro", "sexo", "idade_aproximada", "porte",
             "descricao", "distrito", "bairro", "email_contato", "whatsapp",
