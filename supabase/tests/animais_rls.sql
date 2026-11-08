@@ -2,7 +2,7 @@
 -- Cenários aprovados em blocos independentes com ROLLBACK em adotae-testes.
 -- Novas execuções somente em ambiente descartável e com autorização.
 -- Mesma conexão em todos os passos; instruções com erro esperado são individuais.
--- Pré-requisitos: migração aplicada e dois usuários existentes no Supabase Auth.
+-- Pré-requisitos: todas as migrações aplicadas e dois usuários no Supabase Auth.
 -- Substituir os dois UUIDs abaixo pelos IDs reais de A e B (não usar credenciais).
 begin;
 select set_config('adotae.teste_usuario_a', 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', true);
@@ -139,6 +139,7 @@ update public.animais set email_contato = null, whatsapp = null
 rollback to savepoint invalido;
 savepoint invalido;
 update public.animais set status_adocao = 'inválido' where nome = 'RLS A novo';
+-- ERRO 42501 por falta de privilégio; não chega ao CHECK de status_adocao.
 rollback to savepoint invalido;
 
 -- Limites exatos válidos, inclusive com caracteres multibyte (não contar bytes).
@@ -230,9 +231,15 @@ update public.animais set especie = 'Gato', especie_outro = null, bairro = null,
 update public.animais set especie = 'Outro animal doméstico', especie_outro = 'Coelho',
     whatsapp = '5522999999999', email_contato = 'outro@example.org'
     where nome = 'RLS A novo'; -- UPDATE 1; ambos os contatos aceitos.
-update public.animais set descricao = 'Dono edita sem reativar'
+update public.animais set email_contato = 'oculto@example.org'
     where nome = 'RLS A oculto' returning oculto_admin; -- true
-update public.animais set status_adocao = 'adotado' where nome = 'RLS A publico'; -- UPDATE 1
+savepoint negado;
+update public.animais set status_adocao = 'adotado' where nome = 'RLS A publico'; -- ERRO 42501
+rollback to savepoint negado;
+-- Apenas o operador prepara adoção como fixture; não implementa a operação futura.
+reset role;
+update public.animais set status_adocao = 'adotado' where nome = 'RLS A publico';
+set local role authenticated;
 -- O dono ainda consulta seu anúncio adotado.
 select nome from public.animais where nome = 'RLS A publico'; -- 1 linha
 delete from public.animais where nome = 'RLS A novo'; -- DELETE 1
@@ -283,7 +290,8 @@ select has_column_privilege('authenticated', 'public.animais', 'usuario_id', 'IN
        has_column_privilege('authenticated', 'public.animais', 'usuario_id', 'UPDATE'),
        has_column_privilege('authenticated', 'public.animais', 'oculto_admin', 'UPDATE'),
        has_column_privilege('authenticated', 'public.animais', 'status_publicacao', 'INSERT'),
-       has_column_privilege('authenticated', 'public.animais', 'status_publicacao', 'UPDATE');
+       has_column_privilege('authenticated', 'public.animais', 'status_publicacao', 'UPDATE'),
+       has_column_privilege('authenticated', 'public.animais', 'status_adocao', 'UPDATE');
 -- Todos false. Os testes não podem ser feitos só como postgres (bypass RLS).
 savepoint invalido;
 update public.animais set status_publicacao = 'publicado', email_contato = null,

@@ -1,5 +1,46 @@
 # Banco de dados — etapa SQL
 
+## Proteção da edição de anúncios publicados — validada em adotae-testes
+
+A migração [202611080001_protect_animais_edicao.sql](migrations/202611080001_protect_animais_edicao.sql)
+foi aplicada com sucesso no Supabase **adotae-testes em 08/11/2026**.
+As verificações de privilégios e de ativação do trigger foram aprovadas.
+**Ainda não foi aplicada no projeto Supabase principal.**
+Mantém a RLS de propriedade e os campos editáveis dos rascunhos, revoga UPDATE
+de `status_adocao` para `authenticated` e aborta se grants de tabela, PUBLIC ou
+papéis herdados ainda permitirem UPDATE efetivo em campos protegidos.
+
+O trigger `BEFORE UPDATE`, `SECURITY INVOKER` com `search_path` vazio, bloqueia
+mudanças de identificação, proprietário, estados, moderação e criação por usuários
+comuns. Em publicados, compara a linha inteira com `IS DISTINCT FROM`, exceto
+`email_contato`, `whatsapp` e `atualizado_em`. O trigger `animais_atualizar_data`
+executa antes, por ordem alfabética, e continua responsável pela data automática.
+Os CHECKs existentes validam contatos e impedem remover o último de um publicado.
+Atualizações que repetem valores existentes continuam permitidas nas colunas
+com grant. `postgres` e `service_role` preservam operações privilegiadas conforme
+os grants/RLS existentes; a decisão usa o papel SQL, não claims JWT. Não há
+novas permissões, RPCs, integração Flask ou disponibilização de `service_role`.
+
+O [teste SQL de edição](tests/animais_edicao.sql) roda pelo mecanismo local abaixo,
+com Auth/Storage simulados e ROLLBACK. Exercita rascunhos, contatos, campos
+protegidos, NULLs, isolamento, data automática e operações privilegiadas. A suíte
+também verifica rejeição de privilégios efetivos amplos (tabela, PUBLIC e papel
+herdado), preservação dos metadados/permissões/políticas das fotos e os cenários
+anteriores de confirmação, remoção e concorrência. O roteiro manual de animais
+foi ajustado: adoção é fixture privilegiada, e publicados ocultos editam contatos.
+Os relatos históricos de validação remota das etapas anteriores abaixo não
+substituem a validação específica desta migração registrada nesta seção.
+
+Validação local anterior: **13 testes SQL de integração** no PostgreSQL 18
+e **162 testes Python** passaram. O teste de bloqueio de nome publicado falhou
+antes da nova migração, confirmando a lacuna.
+
+O teste remoto em **adotae-testes** foi aprovado nas quatro verificações:
+edição de rascunho, edição de contato publicado, bloqueio da alteração da
+descrição publicada e exigência de contato na publicação. Foi executado com
+`ROLLBACK`, sem persistir registros fictícios. Esses quatro cenários não
+constituem validação exaustiva de todas as políticas.
+
 ## Primeira fotografia em `/anunciar`
 
 O Flask processa uma foto opcional antes de criar o rascunho, reserva a posição
@@ -342,7 +383,7 @@ Remove-Item Env:ADOTAE_TEST_LOCAL_PG
 
 Nesse banco, Auth e Storage são simulados. **Somente o stub local** recebe
 fixtures de objetos por SQL; não há bytes, bucket ou API Storage reais. Os testes
-executam as três migrações e o roteiro completos, confirmam sucesso/isolamento, caminhos,
+executam as quatro migrações e os roteiros automatizados completos, confirmam sucesso/isolamento, caminhos,
 bucket e proprietário divergentes, tamanho/MIME presentes ou ausentes, estado
 em remoção e repetição sem UPDATE (campos e `ctid` preservados). A concorrência
 usa dois processos `psql` e observa espera real por lock, nas duas ordens entre
@@ -470,13 +511,16 @@ corrigir permissões.
 As políticas SELECT são permissivas e se somam: visitantes veem somente
 publicados, disponíveis e não ocultos; autenticados veem também todos os próprios.
 UPDATE e DELETE têm políticas exclusivas de propriedade, mesmo quando um anúncio
-de outra pessoa é legível publicamente. O proprietário pode editar/excluir um
-anúncio oculto, mas não remover a ocultação.
+de outra pessoa é legível publicamente. Após a migração de proteção de edição,
+o proprietário pode editar os dados permitidos dos rascunhos; nos publicados,
+inclusive ocultos/adotados, somente os contatos. O grant de DELETE é preservado,
+sujeito às FKs existentes. O proprietário não pode remover a ocultação.
 
 `anon` recebe SELECT. `authenticated` recebe SELECT, DELETE e INSERT/UPDATE
 somente nas colunas listadas no SQL. Não recebe TRUNCATE, REFERENCES ou TRIGGER.
 `usuario_id`, `oculto_admin`, `status_publicacao`, ID e datas ficam fora dos grants
-de escrita; `status_adocao` só pode ser editado, não escolhido na inserção.
+de escrita; após a nova migração, `status_adocao` também fica sem INSERT/UPDATE
+para usuários comuns. A operação de adoção será implementada em outra etapa.
 A identidade da inserção vem do JWT validado pelo Supabase via `auth.uid()`,
 nunca de parâmetro Flask, metadados editáveis ou um UUID enviado pelo formulário.
 

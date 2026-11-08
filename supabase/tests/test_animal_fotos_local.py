@@ -123,6 +123,18 @@ class FotosSQLLocal(unittest.TestCase):
         cls.execute((ROOT / "supabase/migrations/202611060001_create_animal_fotos.sql").read_text(encoding="utf-8"))
         cls.storage_before = cls.storage_policy_metadata()
         cls.execute((ROOT / "supabase/migrations/202611070001_fix_animal_fotos_storage_leitura.sql").read_text(encoding="utf-8"))
+        cls.fotos_before = cls.fotos_metadata()
+        cls.execute((ROOT / "supabase/migrations/202611080001_protect_animais_edicao.sql").read_text(encoding="utf-8"))
+
+    @classmethod
+    def fotos_metadata(cls):
+        return cls.execute("""select jsonb_build_object(
+        'tabela',(select to_jsonb(c) from pg_class c where oid='public.animal_fotos'::regclass),
+        'colunas',(select jsonb_agg(to_jsonb(a) order by attnum) from pg_attribute a
+            where attrelid='public.animal_fotos'::regclass),
+        'politicas',(select jsonb_agg(to_jsonb(p) order by schemaname,tablename,policyname)
+            from pg_policies p where (schemaname,tablename) in
+            (('public','animal_fotos'),('storage','objects'))));""")
 
     @classmethod
     def storage_policy_metadata(cls):
@@ -171,6 +183,27 @@ class FotosSQLLocal(unittest.TestCase):
         self.execute((ROOT / "supabase/tests/animal_fotos_rls.sql").read_text(encoding="utf-8"))
         self.assertEqual(self.before, self.audit())
         self.assertEqual(self.storage_before, self.storage_policy_metadata())
+        self.assertEqual(self.fotos_before, self.fotos_metadata())
+
+    def test_edicao_animais(self):
+        self.execute((ROOT / "supabase/tests/animais_edicao.sql").read_text(encoding="utf-8"))
+
+    def test_migracao_edicao_recusa_privilegios_efetivos_amplos(self):
+        migration = (ROOT / "supabase/migrations/202611080001_protect_animais_edicao.sql").read_text(encoding="utf-8")
+        inherited = "edicao_test_" + uuid.uuid4().hex
+        for grant in [
+            "grant update on public.animais to authenticated;",
+            "grant update(status_adocao) on public.animais to public;",
+            f"create role {inherited}; grant {inherited} to authenticated;"
+            f"grant update(status_adocao) on public.animais to {inherited};",
+        ]:
+            with self.subTest(grant=grant):
+                # A falha fecha a conexão e desfaz inclusive papel/membership globais.
+                with self.assertRaisesRegex(AssertionError, "authenticated mantém UPDATE efetivo"):
+                    self.execute("begin;" + grant + migration)
+                self.assertEqual(self.execute("select has_column_privilege("
+                    "'authenticated','public.animais','status_adocao','UPDATE');"), "f")
+                self.assertEqual(self.before, self.audit())
 
     def test_confirma_e_repete_sem_update_ou_campos_extras(self):
         self.run_case(f"""
