@@ -43,7 +43,7 @@ def verificar_configuracao_csrf():
         request.max_content_length = 4 * 1024 * 1024
     if request.endpoint == "adicionar_foto" and not app.secret_key:
         return render_template("foto.html", mensagem=INDISPONIVEL), 503
-    if request.endpoint in ("login", "minha_conta", "logout", "anunciar", "editar_anuncio") and not app.secret_key:
+    if request.endpoint in ("login", "minha_conta", "logout", "anunciar", "editar_anuncio", "publicar_anuncio") and not app.secret_key:
         return render_template("login.html", indisponivel=True,
                                mensagem="Acesso à conta indisponível no momento. Tente novamente mais tarde."), 503
     if request.endpoint == "cadastro" and not app.secret_key:
@@ -244,6 +244,76 @@ def editar_anuncio(animal_id):
     except (APIError, HTTPError, SupabaseException, ValueError, TypeError):
         return render_template("anunciar.html", **contexto, form=form, mensagem=mensagem), 503
     flash("Rascunho atualizado com sucesso!", "rascunho-sucesso")
+    return redirect(url_for("minha_conta"))
+
+
+def consultar_publicacao_propria(animal_id):
+    """Lê apenas o estado do anúncio próprio; nunca aceita outra identidade."""
+    registros = (g.auth_cliente.table("animais")
+                 .select("id,usuario_id,status_publicacao")
+                 .eq("id", str(animal_id)).eq("usuario_id", str(g.usuario.id))
+                 .execute().data)
+    if registros == []:
+        return None
+    if not isinstance(registros, list) or len(registros) != 1 or not isinstance(registros[0], dict):
+        raise ValueError("Resposta de leitura inválida")
+    animal = registros[0]
+    if animal.get("id") != str(animal_id) or animal.get("usuario_id") != str(g.usuario.id):
+        return None
+    if animal.get("status_publicacao") not in ("rascunho", "publicado"):
+        raise ValueError("Estado de publicação inválido")
+    return animal["status_publicacao"]
+
+
+@app.post("/anuncios/<uuid:animal_id>/publicar")
+def publicar_anuncio(animal_id):
+    if g.auth_indisponivel:
+        return render_template("login.html", indisponivel=True, mensagem=INDISPONIVEL), 503
+    if not g.usuario:
+        return redirect(url_for("login"))
+    falhas = (APIError, HTTPError, SupabaseException, ValueError, TypeError)
+    try:
+        estado = consultar_publicacao_propria(animal_id)
+    except falhas:
+        flash("Não foi possível consultar o anúncio agora. Tente novamente mais tarde.", "rascunho-aviso")
+        return redirect(url_for("minha_conta"))
+    if estado is None:
+        # Não distinguir inexistência de falta de autorização.
+        flash("Anúncio indisponível para publicação.", "rascunho-aviso")
+        return redirect(url_for("minha_conta"))
+    if estado == "publicado":
+        flash("Este anúncio já está publicado.", "rascunho-aviso")
+        return redirect(url_for("minha_conta"))
+
+    codigo = None
+    try:
+        # O PostgreSQL decide autorização e pré-requisitos. Nunca repetir a RPC:
+        # uma resposta perdida pode ocorrer depois do COMMIT.
+        g.auth_cliente.rpc("publicar_anuncio", {"p_animal_id": str(animal_id)}).execute()
+    except APIError as erro:
+        codigo = erro.code
+    except falhas:
+        pass
+
+    try:
+        # O retorno void (ou qualquer payload) da RPC não comprova publicação.
+        estado = consultar_publicacao_propria(animal_id)
+    except falhas:
+        estado = None
+    if estado == "publicado":
+        flash("Anúncio publicado com sucesso!", "rascunho-sucesso")
+    elif estado is None:
+        flash("O resultado da publicação é incerto. Confira ‘Meus anúncios’ antes de tentar novamente.",
+              "rascunho-aviso")
+    elif codigo == "42501":
+        flash("Não foi possível publicar. Confira se o rascunho tem pelo menos um contato e uma "
+              "fotografia pronta e se está disponível para publicação.", "rascunho-aviso")
+    elif codigo == "55P03":
+        flash("O anúncio está sendo utilizado em outra operação. Aguarde e confira ‘Meus anúncios’ "
+              "antes de tentar novamente.", "rascunho-aviso")
+    else:
+        flash("A publicação não foi confirmada. Na consulta, o anúncio continua como rascunho. "
+              "Confira ‘Meus anúncios’ antes de tentar novamente.", "rascunho-aviso")
     return redirect(url_for("minha_conta"))
 
 

@@ -12,6 +12,7 @@
         <p><a class="text-link" href="{{ url_for('anunciar') }}">Anunciar animal</a></p>
         <section class="account-list" aria-labelledby="anuncios-titulo">
             <h2 id="anuncios-titulo">Meus anúncios</h2>
+            <p>Para publicar, o anúncio precisa de pelo menos um contato e uma fotografia pronta.</p>
             {% if anuncios is none %}
             <p class="registration-message" role="alert">Não foi possível carregar seus anúncios agora. Tente novamente mais tarde.</p>
             {% elif anuncios %}
@@ -27,6 +28,10 @@
                     {% if animal.status_publicacao == 'rascunho' %}
                     <a class="text-link" href="{{ url_for('editar_anuncio', animal_id=animal.id) }}">Editar</a>
                     <a class="text-link" href="{{ url_for('adicionar_foto', animal_id=animal.id) }}">Fotografia</a>
+                    <form method="post" action="{{ url_for('publicar_anuncio', animal_id=animal.id) }}">
+                        {{ form.csrf_token(id=false) }}
+                        <button class="button" type="submit" aria-label="Publicar anúncio de {{ animal.nome }}">Publicar</button>
+                    </form>
                     {% endif %}
                 </li>
                 {% endfor %}

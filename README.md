@@ -16,9 +16,30 @@ O fluxo de confirmação pela rota `/auth/confirm` foi validado manualmente: o s
 
 Em `/login`, usuários com e-mail confirmado podem entrar. A sessão permanece entre requisições, com renovação dos tokens expirados quando possível. `/minha-conta` exige autenticação e apresenta uma saudação e o botão “Sair”, que envia um POST protegido por CSRF. A navegação oferece “Entrar” ou “Minha conta” conforme a identidade validada. A listagem dos próprios anúncios já funciona em `/minha-conta`; edição de anúncios publicados, exclusão, recuperação de senha e edição de perfil continuam pendentes.
 
-Em `/minha-conta`, o link “Anunciar animal” abre `/anunciar`. Usuários autenticados com e-mail confirmado podem preencher os dados do animal e salvar um rascunho no Supabase, com uma fotografia opcional e contatos opcionais. O formulário usa Flask-WTF, CSRF e validação no servidor, reutilizando as opções do catálogo. Campos opcionais vazios viram NULL; o detalhe de espécie é obrigatório apenas para “Outro animal doméstico”. Após o envio, a aplicação redireciona para a conta com uma mensagem temporária de sucesso ou aviso de falha parcial. Publicação, moderação e exclusão ainda não estão disponíveis.
+Em `/minha-conta`, o link “Anunciar animal” abre `/anunciar`. Usuários autenticados com e-mail confirmado podem preencher os dados do animal e salvar um rascunho no Supabase, com uma fotografia opcional e contatos opcionais. O formulário usa Flask-WTF, CSRF e validação no servidor, reutilizando as opções do catálogo. Campos opcionais vazios viram NULL; o detalhe de espécie é obrigatório apenas para “Outro animal doméstico”. Após o envio, a aplicação redireciona para a conta com uma mensagem temporária de sucesso ou aviso de falha parcial. A publicação ocorre depois, em “Meus anúncios”; moderação e exclusão ainda não estão disponíveis.
 
-A seção “Meus anúncios” em `/minha-conta` consulta a Data API com o cliente autenticado da requisição, filtro explícito pelo proprietário e ordem de criação decrescente. Exibe nome, espécie, distrito e status de publicação, sem fotos, com a opção “Editar” somente nos rascunhos. Lista vazia e falha de consulta têm mensagens distintas; em caso de indisponibilidade ou resposta inválida, a página preserva o logout e retorna HTTP 503. Os testes usam o SDK real com HTTP simulado. A listagem também foi validada manualmente no site conectado ao Supabase de testes, com resultados satisfatórios.
+A seção “Meus anúncios” em `/minha-conta` consulta a Data API com o cliente autenticado da requisição, filtro explícito pelo proprietário e ordem de criação decrescente. Exibe nome, espécie, distrito e status de publicação, sem fotos, com as opções “Editar”, “Fotografia” e “Publicar” somente nos rascunhos. Lista vazia e falha de consulta têm mensagens distintas; em caso de indisponibilidade ou resposta inválida, a página preserva o logout e retorna HTTP 503. Os testes usam o SDK real com HTTP simulado. A listagem também foi validada manualmente no site conectado ao Supabase de testes, com resultados satisfatórios.
+
+“Publicar” envia POST com CSRF para `/anuncios/<uuid>/publicar`. Exige login com
+e-mail confirmado e usa somente o cliente com JWT da requisição para chamar
+`publicar_anuncio`, sem UPDATE direto. O banco decide a autorização e exige pelo
+menos um contato e uma fotografia pronta. A aplicação consulta o anúncio próprio
+antes e depois da RPC; só mostra sucesso quando confirma o estado `publicado`,
+inclusive após perda da resposta. Se a confirmação falhar, informa resultado
+incerto e orienta conferir “Meus anúncios” antes de tentar novamente. Não repete
+a RPC automaticamente. Recusas e disputas de bloqueio têm avisos sem detalhes
+internos. As respostas usam `Cache-Control: no-store`. O fluxo possui testes
+automatizados offline, com o SDK real e HTTP simulado. Em 08/11/2026, foram
+registrados 194 testes Python aprovados e `git diff --check` aprovado. A
+implementação passou por revisão independente, sem problemas bloqueantes.
+
+Na validação manual de 08/11/2026, pelo navegador conectado ao Supabase
+`adotae-testes`, um rascunho válido foi publicado com sucesso: a interface exibiu
+o status `publicado` e deixou de apresentar o botão “Publicar” para esse anúncio.
+A tentativa de publicar um rascunho sem os requisitos obrigatórios foi
+corretamente recusada. A funcionalidade ainda não foi validada no ambiente
+principal; `/anunciar` continua salvando somente rascunhos e o catálogo permanece
+demonstrativo, sem integração ao banco.
 
 Em `/anuncios/<uuid>/editar`, o proprietário autenticado pode editar os dados de seus rascunhos, com as mesmas validações do cadastro e proteção CSRF. As fotografias permanecem intactas. Leitura e UPDATE filtram UUID, proprietário e status de rascunho; apenas os campos permitidos são enviados. A confirmação exige retorno válido com os dados salvos. Atualização sem registros retorna HTTP 409; falhas ou respostas inesperadas retornam HTTP 503, sem mensagem de sucesso. Anúncios inexistentes, de terceiros ou publicados retornam HTTP 404. As respostas usam `Cache-Control: no-store`. O fluxo foi validado offline com o SDK real e HTTP simulado.
 
@@ -48,7 +69,8 @@ Habilitar tabelas na Data API pode alterar privilégios SQL e exige nova auditor
 A leitura pública permite expor `usuario_id`; essa decisão precisa de revisão
 antes da API pública definitiva. A migração SQL de publicação direta foi aplicada
 e validada em `adotae-testes` em 08/11/2026, com testes remotos funcionais e pontuais,
-sem reexecução integral da suíte SQL local. Ainda não há botão ou rota Flask.
+sem reexecução integral da suíte SQL local. A validação do fluxo pela interface
+está registrada no trecho sobre “Publicar” acima.
 Moderação continua pendente.
 
 O módulo `app/fotos.py` oferece `processar_foto(arquivo)` para um `FileStorage`
