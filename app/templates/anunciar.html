@@ -10,7 +10,7 @@
         {% if not indisponivel %}
         <p>Os campos são obrigatórios, exceto os indicados como opcionais. Não é necessário informar contatos ou adicionar fotos nesta etapa.</p>
         <p>Os contatos que você escolher informar serão públicos quando o anúncio for publicado. Não informe seu endereço completo.</p>
-        <form method="post" action="{{ url_for('anunciar') }}">
+        <form method="post" action="{{ url_for('anunciar') }}" enctype="multipart/form-data">
             {{ form.csrf_token }}
             {% for field in (form.nome, form.especie, form.especie_outro, form.sexo, form.idade_aproximada, form.porte, form.descricao, form.distrito, form.bairro, form.email_contato, form.whatsapp) %}
             <div class="registration-field">
@@ -25,6 +25,12 @@
                 {% if field.errors %}<p id="{{ field.name }}-erro" class="field-error" role="alert">{{ field.errors | join(' ') }}</p>{% endif %}
             </div>
             {% endfor %}
+            <div class="registration-field">
+                {{ form.foto.label }}
+                {{ form.foto(aria_describedby='foto-ajuda' ~ (' foto-erro' if form.foto.errors else ''), aria_invalid='true' if form.foto.errors else 'false') }}
+                <small id="foto-ajuda">Uma fotografia JPEG, PNG ou WebP, estática, de até 3 MiB. Após corrigir erros no formulário, selecione a fotografia novamente.</small>
+                {% if form.foto.errors %}<p id="foto-erro" class="field-error" role="alert">{{ form.foto.errors | join(' ') }}</p>{% endif %}
+            </div>
             <button class="button" type="submit">Salvar como rascunho</button>
         </form>
         {% endif %}

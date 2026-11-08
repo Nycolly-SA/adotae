@@ -6,8 +6,8 @@
         <p class="section-label">Minha conta</p>
         <h1 id="conta-titulo">Olá, {{ g.usuario.user_metadata.get('nome') or 'bem-vindo' }}!</h1>
         <p>Você está conectado ao Adotaê.</p>
-        {% for mensagem in get_flashed_messages(category_filter=['rascunho-sucesso']) %}
-        <p class="registration-message" role="status">{{ mensagem }}</p>
+        {% for categoria, mensagem in get_flashed_messages(with_categories=true, category_filter=['rascunho-sucesso', 'rascunho-aviso']) %}
+        <p class="registration-message" role="{{ 'alert' if categoria == 'rascunho-aviso' else 'status' }}">{{ mensagem }}</p>
         {% endfor %}
         <p><a class="text-link" href="{{ url_for('anunciar') }}">Anunciar animal</a></p>
         <form method="post" action="{{ url_for('logout') }}">

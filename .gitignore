@@ -221,3 +221,6 @@ __marimo__/
 
 # Others
 docs
+
+# Manifestos operacionais da validação manual do Storage (sem credenciais).
+/supabase/tests/storage-runs/

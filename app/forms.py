@@ -1,6 +1,7 @@
 """Validação dos formulários; senhas são gerenciadas pelo Supabase."""
 
 from flask_wtf import FlaskForm
+from flask_wtf.file import FileField
 from wtforms import EmailField, PasswordField, SelectField, StringField, TextAreaField
 from wtforms.validators import DataRequired, Email, Length, Optional, Regexp, ValidationError
 
@@ -44,6 +45,7 @@ class SelecaoAnimal(SelectField):
 
 
 class AnimalForm(FlaskForm):
+    foto = FileField("Fotografia (opcional)", render_kw={"accept": "image/jpeg,image/png,image/webp"})
     nome = StringField("Nome do animal", filters=[limpar_texto], validators=[
         DataRequired(message="Informe o nome do animal."),
         Length(max=100, message="Use até 100 caracteres no nome."),

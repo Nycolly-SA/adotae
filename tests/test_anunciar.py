@@ -3,9 +3,13 @@ import json
 import logging
 import re
 import unittest
+from io import BytesIO
+from email.parser import BytesParser
+from email.policy import default
 from unittest.mock import patch
 
 import httpx
+from PIL import Image
 from supabase import create_client
 
 from run import ANIMAIS, OPCOES_FILTROS, app
@@ -31,11 +35,33 @@ class AnunciarTests(unittest.TestCase):
         self.creations = 0
         self.auth_failure = None
         self.api_failure = None
+        self.photo_failure = None
+        self.photo_result = [dict(id="00000000-0000-0000-0000-000000000020",
+                                  animal_id="00000000-0000-0000-0000-000000000010",
+                                  posicao=1, estado="pendente")]
+        self.photo_state = "pronta"
         self.result = [dict(id="00000000-0000-0000-0000-000000000010",
                             usuario_id=self.identity["id"], status_publicacao="rascunho")]
 
         def transport(request):
             self.calls.append(request)
+            path = request.url.path
+            if path in ("/rest/v1/animal_fotos", "/rest/v1/rpc/confirmar_foto") or path.startswith("/storage/v1/"):
+                stage = ("reserva" if path.endswith("animal_fotos") and request.method == "POST"
+                         else "leitura" if request.method == "GET"
+                         else "confirmacao" if "/rpc/" in path else "upload")
+                if self.photo_failure == stage + "-network":
+                    raise httpx.ConnectError("private " + self.access)
+                if self.photo_failure == stage:
+                    return httpx.Response(500, json=dict(
+                        code="42501", statusCode="500", error="private", message="private " + self.access))
+                if stage == "reserva":
+                    return httpx.Response(201, json=self.photo_result)
+                if stage == "upload":
+                    return httpx.Response(200, json={"Key": path.split("/object/")[1]})
+                if stage == "confirmacao":
+                    return httpx.Response(204)
+                return httpx.Response(200, json=[dict(self.photo_result[0], estado=self.photo_state)])
             if request.url.path == "/rest/v1/animais":
                 if self.api_failure == "network":
                     raise httpx.ConnectError("private network details " + self.access)
@@ -88,6 +114,148 @@ class AnunciarTests(unittest.TestCase):
 
     def inserts(self):
         return [r for r in self.calls if r.url.path == "/rest/v1/animais"]
+
+    def photo_requests(self):
+        return [r for r in self.calls if "animal_fotos" in r.url.path
+                or "/storage/" in r.url.path or "/rpc/" in r.url.path]
+
+    def photo(self, formato="PNG"):
+        arquivo = BytesIO()
+        Image.new("RGB", (24, 16), "red").save(arquivo, format=formato)
+        arquivo.seek(0)
+        return arquivo, "foto." + formato.lower()
+
+    def test_photo_form_and_no_photo(self):
+        page = self.client.get("/anunciar").text
+        self.assertIn('enctype="multipart/form-data"', page)
+        self.assertIn('type="file"', page)
+        self.assertIn('accept="image/jpeg,image/png,image/webp"', page)
+        self.assertNotIn('multiple', page)
+        self.client.post("/anunciar", data=self.data())
+        self.assertEqual(self.photo_requests(), [])
+
+    def test_valid_photo_contract(self):
+        for formato in ("JPEG", "PNG", "WEBP"):
+            with self.subTest(formato=formato):
+                self.calls.clear()
+                response = self.client.post("/anunciar", data=self.data(foto=self.photo(formato),
+                    foto_id="forged", animal_id="forged", posicao="3", estado="pronta"))
+                self.assertEqual(response.status_code, 302)
+                requests = self.photo_requests()
+                self.assertEqual(len(requests), 4)
+                reserva, upload, rpc, leitura = requests
+                self.assertEqual(json.loads(reserva.content), {"animal_id": self.result[0]["id"], "posicao": 1})
+                caminho = f'{self.identity["id"]}/{self.result[0]["id"]}/{self.photo_result[0]["id"]}.webp'
+                self.assertEqual(upload.url.path, "/storage/v1/object/animal-fotos/" + caminho)
+                envelope = BytesParser(policy=default).parsebytes(
+                    b"Content-Type: " + upload.headers["content-type"].encode() + b"\r\n\r\n" + upload.content)
+                arquivo = next(part for part in envelope.iter_parts()
+                               if part.get_param("name", header="content-disposition") == "file")
+                self.assertEqual(arquivo.get_content_type(), "image/webp")
+                conteudo = arquivo.get_payload(decode=True)
+                self.assertEqual(upload.headers["x-upsert"], "false")
+                cache = next(part for part in envelope.iter_parts()
+                             if part.get_param("name", header="content-disposition") == "cacheControl")
+                self.assertEqual(cache.get_payload(decode=True), b"0")
+                with Image.open(BytesIO(conteudo)) as image:
+                    self.assertEqual(image.format, "WEBP")
+                self.assertLessEqual(len(conteudo), 512_000)
+                self.assertEqual(rpc.url.path, "/rest/v1/rpc/confirmar_foto")
+                self.assertEqual(json.loads(rpc.content), {"p_foto_id": self.photo_result[0]["id"]})
+                self.assertEqual(leitura.url.params["id"], "eq." + self.photo_result[0]["id"])
+                for req in requests:
+                    self.assertEqual(req.headers["authorization"], f"Bearer {self.access}")
+                    self.assertEqual(req.headers["apikey"], "sb_publishable_test")
+                self.assertIn("fotografia adicionada", self.client.get(response.location).text)
+
+    def test_invalid_photo_before_animal(self):
+        for conteudo in (b"", b"invalid", b"x" * (3 * 1024 * 1024 + 1)):
+            response = self.client.post("/anunciar", data=self.data(foto=(BytesIO(conteudo), "foto.png")))
+            response.request.environ["wsgi.input"].close()
+            self.assertEqual(response.status_code, 400)
+            self.assertIn('id="foto-erro"', response.text)
+            self.assertIn('value="Fubá"', response.text)
+        self.assertEqual(self.inserts(), [])
+        self.assertEqual(self.photo_requests(), [])
+
+    def test_multiple_photos_rejected_before_animal(self):
+        response = self.client.post("/anunciar", data=self.data(foto=[self.photo(), self.photo()]))
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(self.inserts(), [])
+
+    def test_partial_photo_failures(self):
+        for stage, count in (("reserva", 1), ("upload", 2), ("confirmacao", 3), ("leitura", 4)):
+            for suffix in ("", "-network"):
+                with self.subTest(stage=stage, suffix=suffix):
+                    self.calls.clear()
+                    self.photo_failure = stage + suffix
+                    response = self.client.post("/anunciar", data=self.data(foto=self.photo()))
+                    self.assertEqual(response.status_code, 302)
+                    self.assertEqual(len(self.inserts()), 1)
+                    self.assertEqual(len(self.photo_requests()), count)
+                    page = self.client.get(response.location).text
+                    self.assertIn("rascunho foi criado", page)
+                    self.assertIn("fotografia", page)
+                    self.assertNotIn("fotografia adicionada", page)
+                    self.assertNotIn(SUCESSO, page)
+                    self.assertNotIn(self.access, page)
+                    self.assertNotIn("private", page)
+                    self.assertTrue(all(r.method in ("GET", "POST") for r in self.calls))
+
+    def test_invalid_reservation_prevents_upload(self):
+        original = self.photo_result
+        for result in ([], [{}], original * 2, [dict(original[0], id="invalid")],
+                       [dict(original[0], animal_id="other")], [dict(original[0], posicao=2)],
+                       [dict(original[0], estado="pronta")]):
+            with self.subTest(result=result):
+                self.calls.clear()
+                self.photo_result = result
+                response = self.client.post("/anunciar", data=self.data(foto=self.photo()))
+                self.assertEqual(response.status_code, 302)
+                self.assertEqual(len(self.photo_requests()), 1)
+                self.assertNotIn("fotografia adicionada", self.client.get(response.location).text)
+
+    def test_unready_photo_never_reports_success(self):
+        for estado in ("pendente", "removendo"):
+            self.photo_state = estado
+            response = self.client.post("/anunciar", data=self.data(foto=self.photo()))
+            page = self.client.get(response.location).text
+            self.assertIn("rascunho foi criado", page)
+            self.assertNotIn("fotografia adicionada", page)
+
+    def test_photo_preserves_auth_csrf_and_animal_validation(self):
+        for change in ({"csrf_token": "invalid"}, {"nome": ""}):
+            response = self.client.post("/anunciar", data=self.data(foto=self.photo(), **change))
+            self.assertEqual(response.status_code, 400)
+        data = self.data(foto=self.photo())
+        self.identity["email_confirmed_at"] = None
+        self.assertEqual(self.client.post("/anunciar", data=data).location, "/login")
+        self.assertEqual(self.inserts(), [])
+        self.assertEqual(self.photo_requests(), [])
+
+    def test_photo_request_body_limit(self):
+        response = self.client.post("/anunciar", data=self.data(
+            foto=(BytesIO(b"x" * (4 * 1024 * 1024)), "foto.png")))
+        response.request.environ["wsgi.input"].close()
+        self.assertEqual(response.status_code, 413)
+        self.assertIn("excedeu o limite", response.text)
+        self.assertEqual(self.inserts(), [])
+        self.assertEqual(self.photo_requests(), [])
+
+    def test_animal_failure_prevents_photo_reservation(self):
+        self.api_failure = 500
+        response = self.client.post("/anunciar", data=self.data(foto=self.photo()))
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(self.photo_requests(), [])
+
+    def test_photo_uses_refreshed_user_token(self):
+        data = self.data(foto=self.photo())
+        self.cookies(access=jwt(expired=True))
+        response = self.client.post("/anunciar", data=data)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(len(self.photo_requests()), 4)
+        for req in self.photo_requests():
+            self.assertEqual(req.headers["authorization"], f"Bearer {self.access}")
 
     def test_access_and_account_link(self):
         self.assertIn('href="/anunciar"', self.client.get("/minha-conta").text)

@@ -1,5 +1,399 @@
 # Banco de dados — etapa SQL
 
+## Primeira fotografia em `/anunciar`
+
+O Flask processa uma foto opcional antes de criar o rascunho, reserva a posição
+1, envia WebP sem upsert e chama `public.confirmar_foto` com o cliente autenticado.
+Confere `pronta` pela Data API antes de informar conclusão. Os testes dessa
+integração são offline; não alteram as validações remotas registradas abaixo.
+
+Falhas parciais preservam o rascunho e exibem aviso específico. Não há compensação
+automática, mudança para `removendo`, exclusão ou novo upload. Uma falha na reserva
+pode ter ocorrido após o INSERT remoto; uma falha de upload pode deixar bytes
+armazenados; uma falha de confirmação/leitura pode deixar `pendente` ou uma foto
+já `pronta`. Interrupções do processo também podem deixar operações incompletas,
+sem que a aplicação consiga entregar o aviso. A associação usuário/animal/reserva
+permite identificar o caminho posteriormente, mas não há recuperação pela interface.
+
+A menor evolução para retomar o fluxo é consultar a reserva existente do próprio
+rascunho e repetir a RPC idempotente, sem reenviar cegamente o arquivo. Cancelar
+e liberar a posição requer uma operação controlada adicional: as permissões
+atuais não permitem DELETE de reservas, e `removendo` é terminal. Essa operação
+precisa tratar uploads em andamento e confirmar remoção pela API Storage antes
+de limpar a reserva; não basta ampliar grants ou excluir `storage.objects` por SQL.
+Nenhuma migração ou política foi modificada nesta integração.
+
+## Validação do Storage e limitação de cache
+
+O Storage utiliza bucket privado e políticas de acesso. A validação real informada
+em **adotae-testes** confirmou reserva, upload, confirmação por RPC (incluindo
+repetição), download pelo proprietário da foto `pronta` e bloqueio de outros
+usuários e operações proibidas. Após a mudança para `removendo`, novas requisições
+com `cacheNonce` novo foram bloqueadas. A URL previamente utilizada ainda entregou
+bytes, comportamento compatível com cache da CDN; os cabeçalhos não comprovaram
+a origem exata do acesso residual nem uma falha nas políticas RLS.
+O ambiente foi limpo: zero animais, fotografias e arquivos restantes.
+
+A [documentação oficial sobre arquivos privados após revogação](https://supabase.com/kb/troubleshooting/storage-private-bucket-files-still-accessible-after-remove-access-or-logout)
+explica que a CDN pode entregar respostas previamente autorizadas sem consultar
+novamente o Storage. O `cache-control: 0` do upload não comprova ausência desse
+cache. O acesso residual continua sendo um risco de confidencialidade, mesmo
+quando uma nova consulta ao serviço é bloqueada. Respostas previamente armazenadas
+em cache podem permanecer acessíveis temporariamente: a revogação imediata desse
+conteúdo não é garantida. Essa limitação foi aceita para o escopo acadêmico do Adotaê.
+
+Inspeção **local** de `storage3 2.33.0`: `download(path, options=None,
+query_params=None)` faz um GET em `/storage/v1/object/<bucket>/<caminho>`, sem
+HEAD ou consulta de informações, repassando os parâmetros de query a `_request`.
+Este preserva os cabeçalhos da sessão, usa o transporte HTTPX e converte erros
+HTTP em `StorageApiError`; não há cache próprio nesse caminho. `download()`
+retorna somente bytes, sem expor cabeçalhos como `Age` ou `CF-Cache-Status`.
+
+Alteração mínima no [roteiro](tests/validar_storage.py):
+
+- As verificações de leitura usam `query_params={"cacheNonce": uuid4().hex}`,
+  com valor novo por chamada, mantendo rota, sessão, bucket e caminho.
+  É o [bypass documentado da CDN](https://supabase.com/docs/guides/storage/cdn/smart-cdn#bypassing-cache).
+  Não basta acrescentar uma query arbitrária, que a Smart CDN pode desconsiderar.
+- Em `pronta`, compara os bytes tanto com nonce quanto na URL habitual, também
+  aquecendo esta última para observar o risco de revogação.
+- Em `removendo` e após exclusão, exige bloqueio com nonce nos checkpoints
+  `download_removendo_sem_cache` e `download_excluido_sem_cache`, e depois verifica
+  a URL habitual. Se somente esta entregar bytes, registra aviso de possível
+  acesso residual por cache, sem classificá-lo como falha RLS nem comprovar
+  revogação imediata. As verificações restantes e a exclusão continuam normalmente.
+- O resultado é **APROVADO** sem acesso residual, ou **APROVADO COM RESSALVA**
+  quando todas as verificações obrigatórias e o encerramento das sessões passam
+  e resta somente o acesso residual conhecido. Qualquer outro erro ou violação,
+  inclusive sucesso com nonce após revogação, mantém a reprovação.
+- Mantém recusas de operações proibidas, isolamento A/B/visitante, comparação
+  dos bytes, manifesto e limpeza por caminho exato no `finally`. Não amplia SQL,
+  permissões, credenciais, dependências ou configuração do bucket.
+
+Limites: os testes offline verificam o contrato HTTP do SDK e simulam cache;
+não reproduzem a CDN nem certificam a versão implantada. O exemplo oficial de
+nonce usa URL assinada; o roteiro usa a rota autenticada do SDK, sem gerar URL
+assinada. O nonce solicita uma consulta nova, mas é necessário correlacionar os
+checkpoints com logs do Storage na implantação para confirmar que o bypass
+chegou ao serviço. Um 200 com nonce continua sendo falha a investigar; não prova
+sozinho que a RLS autorizou. Um 404 aceito como objeto invisível continua sem
+comprovar ausência física. Não há fallback para outra rota, espera arbitrária,
+purge, alteração de JWT ou repetição até obter o resultado desejado.
+
+Em eventual execução separadamente autorizada,
+correlacionar os novos checkpoints com GETs e horários nos logs seguros, sem
+registrar JWTs, cabeçalhos de autenticação, respostas ou URLs completas. Se o
+bypass for bloqueado e a URL habitual entregar bytes, há evidência compatível
+com cache, sujeita à ressalva descrita acima. Os testes offline não comprovam
+revogação imediata na CDN.
+
+## Fotografias — SQL aplicado em adotae-testes; histórico da investigação
+
+Conforme o resultado informado, a [migração de fotografias](migrations/202611060001_create_animal_fotos.sql)
+foi aplicada em **adotae-testes**, e a versão anterior do [roteiro SQL de segurança](tests/animal_fotos_rls.sql)
+passou sem erros, com tabelas vazias após `ROLLBACK`. O bucket privado `animal-fotos`
+foi criado e conferido: `public=false`, `file_size_limit=512000` e
+`allowed_mime_types=['image/webp']`. Os comentários históricos nos arquivos SQL
+não representam esse novo resultado; as migrações aplicadas não foram modificadas.
+Na execução real posteriormente informada, upload, primeira e segunda confirmação
+da RPC e conferência da reserva passaram. `download_proprio` falhou com
+`StorageApiError`, HTTP 404, código `not_found`. A limpeza foi concluída e
+conferida: **0 animais, 0 reservas e 0 arquivos no bucket**. O fluxo completo de
+Storage ainda não havia sido aprovado naquela execução. Não há processamento,
+integração Flask ou acesso público a fotografias. Não extrapolar esses resultados
+para o projeto principal.
+
+### Hipótese do download e migração corretiva proposta
+
+A migração original aplicada autoriza somente `object.get_authenticated` para
+fotos próprias `pronta`. A [documentação oficial de controle de acesso](https://supabase.com/docs/guides/storage/security/access-control)
+usa `object.get_authenticated` e `object.get_authenticated_info` no exemplo de
+leitura sem listagem. A ausência da segunda operação **pode explicar** uma
+negação caso a versão/rota efetivamente utilizada a propague; não é causa
+comprovada do 404 observado. Os testes SQL anteriores também a negavam.
+
+Há evidência que limita essa hipótese: o SDK Python instalado faz um único
+`GET /object/<bucket>/<caminho>` em `download()`, sem consulta prévia de informações.
+No [código oficial atual da rota de download](https://github.com/supabase/storage/blob/master/src/http/routes/object/getObject.ts),
+essa rota usa `GET_AUTH_OBJECT` (`object.get_authenticated`), já permitido.
+Já a [rota de informações](https://github.com/supabase/storage/blob/master/src/http/routes/object/getObjectInfo.ts)
+usa `GET_AUTH_OBJECT_INFO` (`object.get_authenticated_info`); HEAD tem operação
+distinta e continua bloqueado. O código upstream não certifica a versão implantada
+em `adotae-testes`. O 404 isolado não distingue objeto ausente de objeto invisível
+por RLS, nem confirma JWT, caminho ou políticas efetivamente usados no download.
+O sucesso da RPC confirma suas verificações naquele instante; não prova leitura
+pela sessão, pois a consulta ao catálogo ocorre na auxiliar `SECURITY DEFINER`.
+
+A nova [202611070001_fix_animal_fotos_storage_leitura.sql](migrations/202611070001_fix_animal_fotos_storage_leitura.sql)
+é uma proposta de compatibilidade com a leitura documentada, **não aplicada**.
+Usa `ALTER POLICY` exclusivamente no `USING` de `animal_fotos_storage_leitura`:
+troca o filtro de operação de `pronta` por `allow_any_operation` com as duas
+operações. Preserva `RESTRICTIVE`, SELECT, papel `authenticated`, proprietário
+atual do animal, caminho exato, neutralidade para outros buckets e SELECT auxiliar
+de `object.delete`/`object.delete_many` somente em `removendo`. Não altera a
+migração original, grants, RPC, política de exclusão ou configuração do bucket
+privado. O único acesso novo é a consulta autenticada de informações da própria
+foto `pronta`; listagem, URLs assinadas e demais rotas continuam bloqueadas.
+
+Verificações desta proposta e próximas etapas:
+
+1. Localmente, aplicar as três migrações em ordem no PostgreSQL descartável com
+   Auth/Storage simulados e executar o [roteiro SQL](tests/animal_fotos_rls.sql).
+   Ele autoriza ambas as leituras para própria `pronta`, nega `pendente`,
+   `removendo`, usuário B e caminhos forjados, e mantém as negações de assinatura,
+   listagem e operações alternativas. Os testes preservam as verificações de
+   exclusão, visitante, grants e políticas de animais. A integração local também
+   compara todas as políticas de Storage antes/depois, exceto o `USING` ajustado.
+2. Somente em etapa futura autorizada, revisar/aplicar **apenas a nova migração**
+   em `adotae-testes`, conferir bucket privado, grants e políticas efetivas e
+   repetir o roteiro Python com sessões A/B e arquivo descartável. Conferir bytes
+   do download, isolamento, operações proibidas e exclusão. Validar separadamente
+   a rota de informações própria/alheia e estados; o roteiro Python não a chama.
+3. Correlacionar a requisição com logs seguros do Storage para identificar a
+   operação propagada e a versão instalada. Se continuar em 404, conferir sessão
+   autenticada, bucket/caminho exatos, estado/propriedade e combinação de políticas;
+   não ampliar permissões por tentativa. Não registrar tokens, senhas ou URLs
+   assinadas. Confirmar novamente a limpeza de animais, reservas e arquivos.
+
+Nesta revisão não houve SQL no Supabase nem acesso remoto ao Storage. O roteiro
+`validar_storage.py` permanece intacto: seus checkpoints e comparação dos bytes
+já permitem repetir o cenário sem enfraquecer os critérios de sucesso. Testes
+locais não reproduzem o HTTP 404 real nem demonstram que a proposta o elimina.
+
+**Resultados locais desta revisão:** o teste ampliado falhou contra a migração
+original em `object.get_authenticated_info`; após aplicar a corretiva no banco
+simulado, os **11 testes SQL locais** passaram no PostgreSQL 18, incluindo o
+roteiro até `ROLLBACK` e a concorrência. A suíte Python passou com **110 testes**.
+`git diff --check` e a conferência de whitespace dos arquivos novos passaram.
+Esses resultados não substituem a validação futura no serviço real.
+
+### Modelo e autorização
+
+`public.animal_fotos` usa UUID e data gerados pelo banco, FK obrigatória para
+`animais` com `NO ACTION`, posição `smallint` entre 1 e 3 e estados textuais com
+`CHECK`. `UNIQUE(animal_id, posicao)` impede reservas duplicadas inclusive em
+transações concorrentes; reservas pendentes ou em remoção também ocupam posição.
+O índice único atende consultas por animal e a FK. Não há coluna de URL ou caminho:
+o caminho canônico será `<usuario_id>/<animal_id>/<foto_id>.webp`.
+
+Somente `authenticated` recebe SELECT, INSERT nas colunas `animal_id,posicao`
+e UPDATE em `estado`. Visitantes não recebem privilégios. RLS verifica o dono
+explicitamente, mesmo quando o animal de outro usuário é legível publicamente.
+Reservas exigem animal próprio em rascunho; nenhuma política de `animais` é alterada.
+
+| Operação | Cliente proprietário | Operador confiável (`postgres`/`service_role`) |
+| --- | --- | --- |
+| Inserir reserva | Somente `pendente`, valores padrão; animal em rascunho | Também inicia `pendente` |
+| `pendente → pronta` | Somente RPC de confirmação, após verificar reserva/objeto | Permitido pelo trigger |
+| `pendente → removendo` | Permitido | Permitido |
+| `pronta → removendo` | Permitido | Permitido |
+| Retornar de `removendo`, outras transições ou repetir estado | Proibido | Proibido pelo trigger |
+| Alterar ID, animal, posição ou data | Proibido | Proibido pelo trigger |
+| Excluir reserva | Sem grant/política | Limpeza futura após remoção confirmada pela API Storage |
+
+RLS não compara OLD e NEW e não comprova processamento de imagens. A menor
+solução adotada combina grants por coluna, RLS e um trigger `SECURITY INVOKER`
+com `search_path` vazio. UPDATE direto para `pronta` continua proibido para
+clientes; somente a auxiliar privada de confirmação eleva privilégios. A função do trigger não é
+executável por clientes. Papéis confiáveis continuam sujeitos ao trigger, mas
+um administrador capaz de desativá-lo está fora desse limite de proteção.
+
+O custo desta etapa conservadora é não liberar posições automaticamente:
+`removendo` é terminal para clientes. Não há limpeza, expiração ou recuperação
+automática de reservas ainda. Não ampliar grants para contornar
+isso. A futura etapa de processamento precisará coordenar SQL e Storage: upload,
+cancelamento e exclusão não formam uma transação única. Deve tratar uploads em
+andamento, falhas e tentativas repetidas antes de apagar reservas ou liberar vagas.
+Não colocar `service_role` no navegador nem acrescentá-lo ao Flask nesta etapa.
+
+### Confirmação com a sessão autenticada
+
+`public.confirmar_foto(p_foto_id uuid)` retorna `void`, usa `SECURITY INVOKER` e
+apenas delega para `adotae_private.confirmar_foto(uuid)`. A auxiliar usa
+`SECURITY DEFINER`, pertence explicitamente a `postgres` e executa o UPDATE aceito
+pelo trigger. Ambas fixam `search_path = ''`, usam nomes qualificados e recebem
+EXECUTE somente para `authenticated`, além dos direitos do proprietário. Grants
+padrão de `PUBLIC`, `anon` e `service_role` são removidos das duas funções.
+
+O schema privado concede apenas USAGE para `authenticated`, sem CREATE. O
+wrapper INVOKER necessita desse USAGE e do EXECUTE da auxiliar; por isso uma
+conexão SQL autenticada também consegue chamar a auxiliar diretamente, sujeita
+às mesmas verificações. O isolamento da Data API depende de manter
+**`adotae_private` fora de Exposed schemas**. A migração e o roteiro recusam a
+configuração `pgrst.db_schemas` que mencione o schema, quando essa configuração
+estiver disponível na conexão. Isso não certifica a configuração efetiva do
+serviço; conferi-la antes da aplicação e testar que a auxiliar não tem endpoint.
+Nenhum comando altera Exposed schemas ou configura a Data API.
+
+A auxiliar exige `auth.uid()`, filtra propriedade antes de bloquear a reserva
+com `FOR UPDATE` e mantém um lock `FOR SHARE` no animal para preservar o
+rascunho durante a confirmação. Recusa reserva inexistente, alheia, em remoção
+ou de animal publicado. Consulta somente o objeto no bucket `animal-fotos`,
+no caminho derivado de usuário/animal/foto e com `owner_id` igual ao usuário.
+Não recebe proprietário, caminho ou estado como parâmetro; não modifica animais,
+IDs, posições, datas ou metadados do Storage. Não concede SELECT adicional ao
+chamador nem altera `storage.operation` para contornar políticas.
+
+Se `metadata.size` estiver disponível, precisa representar de 1 a 512000 bytes
+inteiros; se `metadata.mimetype` estiver disponível, precisa ser `image/webp`.
+Campos ausentes ou JSON null são tratados como indisponíveis, conforme a regra
+desta etapa. A configuração do bucket continua obrigatória e independente.
+`pronta` significa **objeto registrado e associado corretamente**, sem afirmar
+decodificação, processamento ou validade dos bytes. A RPC pode ser chamada
+diretamente pelo usuário, independentemente de uma futura validação no Flask.
+
+Uma repetição em `pronta` revalida proprietário, rascunho, objeto e metadados,
+mas retorna sem UPDATE. Se o upload terminar e a resposta se perder, pode-se
+repetir a confirmação; um conflito no upload não substitui essa verificação.
+Confirmação e solicitação de remoção concorrem pelo lock da foto: se a confirmação
+termina primeiro, a remoção pode seguir; se a remoção termina primeiro, a
+confirmação falha, sem ressuscitar a reserva. Isso não torna SQL e armazenamento
+de bytes uma única transação. Falhas na remoção mantêm `removendo` para nova
+tentativa via API; liberar posições continua dependendo de solução futura.
+
+O SDK Python já instalado permite a chamada futura com o cliente da sessão:
+`g.auth_cliente.rpc('confirmar_foto', {'p_foto_id': foto_id}).execute()`.
+Nenhuma alteração Flask ou credencial administrativa foi adicionada.
+Referências: [segurança e privilégios de funções](https://supabase.com/docs/guides/database/functions),
+[exposição de schemas](https://supabase.com/docs/guides/api/using-custom-schemas).
+
+### Políticas de Storage com a correção proposta
+
+As seis políticas são limitadas ao bucket `animal-fotos`: uma base permissiva,
+um guarda restritivo de papéis e quatro guardas restritivos por comando. Os
+guardas se somam por AND às políticas permissivas existentes, evitando que uma
+política ampla de outro recurso libere este bucket. Para outros buckets são
+neutros; os GRANTs globais e políticas existentes do Storage não são alterados.
+
+| Operação Storage | Condição adicional ao proprietário e ao caminho exato |
+| --- | --- |
+| `object.upload` | Reserva `pendente`, animal ainda em rascunho; somente INSERT |
+| `object.get_authenticated`, `object.get_authenticated_info` | Reserva própria `pronta`; download e informações autenticados (segunda operação requer a migração corretiva) |
+| `object.delete`, `object.delete_many` | Reserva `removendo`; SELECT e DELETE somente nessas operações |
+| UPDATE, upsert, copy/move, assinatura de URL de leitura/upload, listagem | Bloqueados |
+| S3, TUS, transformações e outras rotas | Sem autorização nesta etapa |
+
+O caminho é comparado integralmente com UUIDs canônicos obtidos das tabelas,
+sem converter segmentos enviados pelo cliente em UUID. Isso recusa IDs forjados,
+extensão diferente, diretórios extras e prefixos de outro usuário. A autorização
+vem da reserva e do proprietário atual do animal, sem depender de `owner_id`
+ou metadados enviados no upload.
+
+Um SELECT genérico também permitiria outras ações. Por isso os filtros usam
+`storage.allow_only_operation()` e `storage.allow_any_operation()`, com nomes
+exatos das operações. Sem contexto de operação, esses helpers negam acesso.
+A migração falha se faltarem os helpers ou RLS em `storage.objects`; não instala
+substitutos. Referências oficiais verificadas para esta proposta:
+[helpers e normalização](https://supabase.com/docs/guides/storage/schema/helper-functions),
+[controle de acesso e upsert](https://supabase.com/docs/guides/storage/security/access-control),
+[nomes das operações](https://github.com/supabase/storage/blob/master/src/http/routes/operations.ts).
+
+Em futuras instalações, criar após autorização **somente** o bucket `animal-fotos`, com `public: false`,
+`file_size_limit: 512000` (500 KiB) e `allowed_mime_types: ['image/webp']`.
+Conferir os três valores antes de enviar arquivos. O limite global precisa
+permitir esse tamanho. [Criação de buckets](https://supabase.com/docs/guides/storage/buckets/creating-buckets).
+Não habilitar exposição de tabela na Data API nem editar diretamente os
+metadados de `storage.objects`. MIME e extensão não comprovam conteúdo WebP
+válido; validação/decodificação ficará para a etapa de processamento.
+
+### Validação SQL e limites
+
+O roteiro usa dois usuários Auth existentes, claims simulados e papéis locais,
+como o roteiro de animais. Funções temporárias verificam resultados e SQLSTATEs
+automaticamente, recuperando erros esperados em subtransações. Qualquer erro não
+esperado deve interromper a execução e ser seguido de `ROLLBACK`. O roteiro
+sempre termina em `ROLLBACK`; não cria usuários nem escreve em `storage.objects`.
+Executar com o operador `postgres`, não com um cliente. A/B devem ser distintos.
+
+São verificáveis em SQL: privilégios efetivos de tabela/coluna (incluindo herança),
+RLS, propriedade A/B, visitantes e ausência de identidade, defaults, posições,
+unicidade, FK sem cascata, transições e campos imutáveis. O roteiro simula grants
+e uma política UPDATE indevidos dentro de SAVEPOINT para conferir a defesa do
+trigger. Isso não torna seguro ampliar grants: INSERT amplo, por exemplo, permite
+escolher ID/data. A auditoria inicial deve passar integralmente antes de usar a API.
+Repetir a auditoria depois de qualquer mudança de exposição da Data API.
+
+Os testes de Storage em SQL avaliam os predicados realmente instalados sobre
+caminhos sintéticos e verificam os guardas restritivos; uma política ampla
+temporária também testa o bloqueio anônimo e a neutralidade para outros buckets.
+Não testam bytes, a interpretação HTTP ou a composição em operações reais.
+O final do roteiro descreve o teste de unicidade em duas conexões concorrentes.
+Também audita os privilégios efetivos das funções/schemas, modo de execução,
+proprietário e search_path, e testa RPC sem objeto, sem identidade, como visitante,
+como outro usuário e em estados proibidos. Seu bloco comentado de confirmação
+válida exige uma reserva/arquivo previamente preparados pela API autorizada;
+**não foi executado com Storage real**. Não criar essas fixtures por SQL no serviço.
+Para comparar `animais` antes/depois de aplicar a migração, guardar suas ACLs e
+`pg_policies` previamente; o snapshot interno do roteiro verifica apenas que
+o próprio teste não altera essas definições.
+
+O [teste local de integração SQL](tests/test_animal_fotos_local.py) usa somente
+Python padrão e o `psql` instalado. Requer ativação explícita, servidor temporário
+em `127.0.0.1:55439` e `data_directory` chamado `adotae-fotos-pg-*`; cria e remove
+um banco aleatório apenas nessa instância. Descarta variáveis PG herdadas que
+poderiam redirecionar a conexão. Não inicia servidores nem cria recursos remotos.
+Exemplo, com a instância temporária local já iniciada:
+
+```powershell
+$env:ADOTAE_TEST_LOCAL_PG = '1'
+.\.venv\Scripts\python.exe supabase/tests/test_animal_fotos_local.py
+Remove-Item Env:ADOTAE_TEST_LOCAL_PG
+```
+
+Nesse banco, Auth e Storage são simulados. **Somente o stub local** recebe
+fixtures de objetos por SQL; não há bytes, bucket ou API Storage reais. Os testes
+executam as três migrações e o roteiro completos, confirmam sucesso/isolamento, caminhos,
+bucket e proprietário divergentes, tamanho/MIME presentes ou ausentes, estado
+em remoção e repetição sem UPDATE (campos e `ctid` preservados). A concorrência
+usa dois processos `psql` e observa espera real por lock, nas duas ordens entre
+confirmação e remoção. A comparação antes/depois da migração confere políticas
+e ACLs de animais e ACLs de Storage intactas.
+
+**Resultados locais desta etapa:** os 10 testes SQL locais, incluindo o roteiro
+até `ROLLBACK` e a concorrência, passaram no PostgreSQL 18. A suíte Python
+existente também passou separadamente com **87 testes**. A revisão independente
+não encontrou falhas críticas/importantes. O lock `FOR SHARE` do animal não foi
+testado contra publicação concorrente; a concorrência automatizada desta etapa
+cobre confirmação/remoção da foto. Na etapa anterior, também foram verificados
+COMMIT/ROLLBACK concorrentes de reservas e limite de três posições. Nenhum
+resultado local valida a configuração ou versão de um projeto Supabase;
+nenhum teste remoto foi feito.
+
+O checklist mais amplo abaixo permanece para etapas futuras. O roteiro Python
+ao final deste documento cobre somente os cenários solicitados nesta etapa;
+não executa automaticamente todo este checklist.
+Após revisão e autorização, ainda será necessário validar no `adotae-testes`,
+com bucket privado e sessões reais A/B (sem chave privilegiada nas chamadas):
+
+1. Reservar como A e enviar WebP para o caminho exato com `upsert: false`.
+   Recusar visitante/B, animal B, reserva inexistente, estado incorreto,
+   animal publicado, diretórios extras e extensões diferentes.
+2. Repetir upload no mesmo caminho e tentar `upsert: true`, UPDATE, copy/move
+   dentro do bucket e entre buckets, inclusive origem/destino com reservas
+   válidas. Todos devem falhar sem alterar bytes ou criar novos objetos.
+3. Download de `pronta` apenas pelo dono. Recusar `pendente`/`removendo`, B,
+   visitante, URL pública e listagem. Tentar criar URLs assinadas individuais,
+   em lote e de upload: nenhuma URL/token utilizável deve ser emitido, nem
+   quando se usar o caminho correto de uma reserva do próprio usuário.
+4. Solicitar `removendo` e remover via API como dono. Recusar remoção antes
+   disso e por B. Conferir bytes/objetos depois: respostas vazias ou HTTP de
+   sucesso podem mascarar uma exclusão negada. Reserva permanece até limpeza
+   confiável futura; não usar DELETE SQL em `storage.objects`.
+5. Conferir o limite de 512000 bytes (aceito) e 512001 (recusado), MIME WebP
+   e outros MIME recusados. Para testar os limites, usar novas reservas próprias.
+6. Conferir os nomes de operação propagados pela versão real do serviço,
+   inclusive SELECT auxiliar da remoção, a composição com políticas existentes
+   e a negação das rotas alternativas. Usar arquivos descartáveis; a limpeza
+   de bytes depende da API e não é desfeita por ROLLBACK SQL.
+7. Confirmar via RPC com a sessão de A, repetir e conferir campos preservados;
+   negar B/visitante, reserva sem objeto ou em remoção. Conferir metadados reais
+   e a propagação do JWT. Verificar que somente o wrapper INVOKER está exposto,
+   sem endpoint para `adotae_private`, e repetir a auditoria de grants efetivos.
+   Testar confirmação versus remoção concorrentes no serviço real.
+
+As seções seguintes registram o histórico da etapa de **animais**; aprovações
+remotas e contagens anteriores não se aplicam à validação real do Storage.
+
 O arquivo [202611010001_create_animais.sql](migrations/202611010001_create_animais.sql)
 cria `public.animais` no Supabase PostgreSQL. A migração foi aplicada em
 `adotae-testes` e no projeto principal. O catálogo não está integrado ao banco.
@@ -349,4 +743,187 @@ Os testes **offline**, sem executar o roteiro real, podem ser rodados com:
 
 ```powershell
 .\.venv\Scripts\python.exe -m unittest tests.test_validacao_data_api
+```
+
+## Roteiro Python para validação real do Storage
+
+[tests/validar_storage.py](tests/validar_storage.py) implementa os cenários abaixo
+com o SDK Python instalado (verificado localmente com `supabase 2.33.0`), sem
+novas dependências. A validação real informada e a limitação conhecida estão
+registradas no início deste documento. O ajuste de classificação foi validado
+somente offline, sem nova execução remota.
+Os [testes offline](../tests/test_validacao_storage.py) usam o SDK real com
+`httpx.MockTransport`, além de testes das barreiras de segurança. Não certificam
+as políticas remotas nem simulam integralmente o serviço Storage.
+
+Plano local realizado: conferir SQL e contratos do SDK; testar confirmação de
+destino e classificações de erro; implementar o fluxo e a recuperação de
+respostas perdidas; documentar execução e limpeza; executar a suíte offline.
+
+### GRANTs e Data API
+
+A migração aplicada já concede a `authenticated`:
+
+- `SELECT` em `public.animal_fotos`;
+- `INSERT` somente em `animal_id, posicao`;
+- `UPDATE` somente em `estado`;
+- `EXECUTE` em `public.confirmar_foto(uuid)` e acesso mínimo à auxiliar privada.
+
+O roteiro SQL aprovado também verifica `USAGE` em `public` e privilégios efetivos
+de tabela/coluna, inclusive ausência de `DELETE`. Portanto **não é necessário
+conceder ALL, INSERT/UPDATE de tabela ou habilitar permissões amplas no painel**.
+O schema `public` já está exposto segundo o histórico da Data API; mantenha
+`adotae_private` fora de Exposed schemas. A configuração efetiva e o cache do
+PostgREST ainda dependem do teste real: o preflight faz `SELECT` autenticado por
+A e B em `animal_fotos`, filtrado por UUID aleatório, antes de qualquer INSERT.
+Resposta vazia comprova que a consulta foi aceita, sem ler dados preexistentes.
+Não comprova sozinha visibilidade de registros; isso é conferido após a reserva.
+
+Se houver erro de tabela ausente/cache ou permissão, interrompa e confira a
+exposição de `public`, o cache da Data API e os privilégios efetivos. Não use o
+botão de exposição para ampliar GRANTs nem reaplique a migração. O roteiro não
+altera configuração da Data API e não exige consultar `storage.objects` por SQL.
+
+### Execução futura, manual e exclusivamente em adotae-testes
+
+Reutilize as contas A e B existentes, distintas e com e-mails confirmados.
+Use um terminal interativo sem gravação/transcrição, e configure apenas:
+
+```powershell
+$env:ADOTAE_TEST_SUPABASE_URL = "https://<Project-Reference-de-adotae-testes>.supabase.co"
+$env:ADOTAE_TEST_SUPABASE_PUBLISHABLE_KEY = "sb_publishable_<chave-publicavel-de-adotae-testes>"
+.\.venv\Scripts\python.exe supabase/tests/validar_storage.py
+```
+
+Não execute agora como parte dos testes locais. O script não importa Flask nem
+carrega `.env`, não aceita chaves secretas/JWTs legados e não usa variáveis da
+aplicação como fallback. Recusa URL igual a `SUPABASE_URL` quando já presente no
+ambiente. Antes de qualquer conexão, exige que você confira independentemente
+no painel de **adotae-testes** e digite `adotae-testes <Project Reference>`.
+Exige também `bucket conferido` após a conferência dos três valores acima.
+A chave publicável não permite verificar administrativamente o nome do projeto
+ou a configuração do bucket; essas duas confirmações humanas são obrigatórias.
+
+Depois, informe e-mail e senha de A e B nos prompts. As senhas ficam ocultas;
+se o terminal não puder ocultá-las, o script interrompe. Não passe credenciais
+por argumentos. Sessões são independentes, sem persistência ou renovação
+automática, e a identidade é confirmada pelo Auth. Nenhuma conta é criada ou
+alterada; o encerramento usa somente `scope=local`, sem logout global de A/B.
+Um terceiro cliente não possui sessão. Logs do SDK são desativados; respostas,
+exceções brutas, senhas, JWTs, chaves e eventuais URLs assinadas não são impressos.
+
+### Cenários e limites
+
+1. A/B consultam a tabela pela Data API. A cria um rascunho fictício com nome
+   `TESTE-STORAGE-<uuid>` e reserva a posição 1, omitindo ID, dono e estado.
+2. Uploads com prefixo de B, animal forjado, foto sem reserva, extensão incorreta
+   ou diretório extra devem falhar. Os identificadores gerados e caminhos exatos
+   são registrados antes das tentativas. Nenhuma operação usa outro bucket.
+3. A envia uma fixture WebP lossless de 1×1 (34 bytes) ao caminho canônico exato,
+   com `content-type=image/webp` e `upsert=false`. Download pendente e assinatura
+   de upload devem ser recusados. UPDATE direto para `pronta` também é recusado.
+4. A chama `confirmar_foto` passando apenas `p_foto_id`. A linha deve mudar
+   somente de `pendente` para `pronta`; a segunda chamada preserva a linha inteira.
+   O download próprio deve devolver exatamente os bytes enviados.
+5. B/visitante não leem a reserva, não confirmam, não fazem upload no caminho de
+   A, não baixam, não assinam a leitura nem excluem o arquivo. A não pode assinar
+   leitura/upload, listar objetos, atualizar, fazer upsert, copy/move ou excluir
+   antes de solicitar remoção. Também se testa DELETE SQL negado e B sem UPDATE.
+   Após tentativas destrutivas, A confere a linha e os bytes novamente.
+6. A solicita `removendo`, confere o estado, tem nova confirmação e download
+   recusados e exclui pela API Storage. Exige retorno de exatamente um objeto,
+   com o caminho esperado. A repetição da exclusão deve retornar lista vazia;
+   a reserva permanece em `removendo`.
+
+Somente negações Storage conhecidas contam como bloqueio. Leituras/assinaturas
+podem ocultar o objeto com código de ausência conhecido. Rede, JWT inválido,
+bucket ausente, limites de requisição, MIME inválido e erro interno reprovam o
+cenário. Respostas vazias de DELETE/listagem podem ser bloqueio por RLS, mas
+**não provam exclusão física**. Antes da remoção, os bytes continuam sendo
+conferidos; na remoção autorizada, exige-se o objeto no retorno da API.
+Se o serviço instalado retornar códigos/formato diferentes, a execução reprova
+para revisão local; não ampliar indiscriminadamente os erros aceitos.
+
+Para diagnosticar essa falha em uma repetição manual, após a primeira confirmação
+e a gravação de `estado=pronta`, o terminal registra `CHECKPOINT INÍCIO` e
+`CHECKPOINT OK` para `segunda_rpc`, `conferencia_reserva` e `download_proprio`
+(inclui a comparação dos bytes). Se uma dessas operações falhar, inclusive por
+exceção inesperada ou Ctrl+C, a reprovação informa `etapa` e `tipo`, acrescentando
+somente status HTTP válido e códigos de uma lista conhecida quando disponíveis.
+Mensagens brutas, argumentos, respostas e URLs não entram nesses diagnósticos;
+códigos desconhecidos são omitidos. Exceções inesperadas fora desses três
+checkpoints também informam o tipo, sem atribuir uma etapa específica.
+O manifesto e o fluxo de limpeza permanecem iguais. Compartilhe somente as
+linhas dos checkpoints e da reprovação; não envie credenciais nem respostas da
+API. Esta alteração foi verificada apenas offline e não determina a causa
+remota da primeira execução.
+
+Não são testados processamento de imagens, resistência a arquivos maliciosos,
+limites de tamanho/MIME do bucket, concorrência, publicação, S3, TUS, transformações
+ou consumo de URLs assinadas. A assinatura deve ser recusada, não utilizada.
+O teste de visitantes usa download sem sessão pelo SDK; não faz GET separado na
+rota de URL pública. A RPC verifica associação/metadados, sem decodificar o WebP.
+
+### Manifesto e limpeza controlada
+
+Antes das escritas, o script grava e anuncia
+`supabase/tests/storage-runs/<uuid>.json`, ignorado pelo Git. Contém somente
+referência do projeto, nome exclusivo, UUIDs A/B/animal/foto, caminhos candidatos,
+estados e marcos da execução; **não contém credenciais**. Guarde-o até a limpeza.
+Atualizações são feitas por substituição de arquivo temporário. Se a persistência
+falhar, a próxima operação é interrompida. Se perder uma resposta de INSERT,
+recupera o animal pelo nome exato e dono A e as reservas desse animal.
+
+No sucesso, o arquivo canônico já foi excluído pela API. Em falha/interrupção,
+`finally` tenta recuperar a reserva da posição 1, solicitar `removendo` e remover
+somente seu caminho exato pela API Storage, sem DELETE SQL. Um retorno vazio é
+registrado como ausência física não comprovada. Se uma tentativa negativa tiver
+sido aceita indevidamente, não se tenta varrer diretórios: os caminhos candidatos
+ficam no manifesto para conferência e limpeza manual. Falha, expiração da sessão,
+perda de rede ou encerramento forçado podem deixar arquivos/registros pendentes.
+
+**Sempre haverá limpeza SQL pendente após o fluxo completo.** A não possui
+DELETE em `animal_fotos`; a FK `NO ACTION` impede excluir o animal ainda vinculado.
+O script não recebe credenciais administrativas, não gera DELETE automático,
+não libera posição e não promete rollback entre serviços.
+
+Plano para uma etapa posterior, separada e explicitamente autorizada:
+
+1. No painel, confirmar novamente **adotae-testes** e o manifesto desta execução.
+   Conferir por igualdade o nome `TESTE-STORAGE-<uuid>`, dono A, `animal_id`,
+   `foto_id`, posição e estados; se faltarem IDs por perda de resposta, localizar
+   pelo **nome completo e dono**, depois registrar os IDs exatos. Não usar LIKE,
+   prefixos, exclusão em lote de usuários ou limpeza de outras execuções.
+2. Conferir a resposta da API para exclusão do arquivo canônico e todos os
+   caminhos negativos listados. Se houver incerteza, inspecionar esses caminhos
+   exatos no painel Storage. Eventual arquivo residual deve ser removido pela
+   API/painel Storage em ação separada e autorizada; nunca por SQL em
+   `storage.objects`. Se a política impedir a limpeza pelo usuário, interromper
+   e planejar essa intervenção, sem ampliar GRANTs ou fornecer chaves ao script.
+3. Somente após comprovar ausência dos arquivos e encerrar a execução, um
+   operador autorizado poderá fazer a limpeza controlada das tabelas públicas:
+   em transação, conferir/reservar as linhas, apagar primeiro **somente as
+   reservas identificadas** (IDs exatos + animal + dono + nome conferidos), depois
+   o animal por ID + dono + nome, exigindo as contagens esperadas. Interromper e
+   dar ROLLBACK em qualquer divergência ou vínculo inesperado. Revisar os
+   registros afetados antes de COMMIT. Essa etapa não está automatizada nem
+   autorizada para execução nesta preparação.
+4. Conferir ausência desses IDs e dos caminhos, guardar o resultado e só então
+   descartar o manifesto local.
+
+O retorno **0** acompanha **APROVADO** ou **APROVADO COM RESSALVA**, conforme os
+critérios de cache acima, com encerramento das sessões confirmado e
+**limpeza SQL ainda pendente**. Retorno **1** indica reprovação/interrupção;
+leia o manifesto e planeje pendências antes de repetir. Uma nova execução usa
+novos identificadores e não limpa automaticamente uma execução anterior.
+
+Após a execução futura, remova as duas variáveis temporárias do terminal com
+`Remove-Item Env:ADOTAE_TEST_SUPABASE_URL` e
+`Remove-Item Env:ADOTAE_TEST_SUPABASE_PUBLISHABLE_KEY`.
+
+Para validar **somente localmente**, sem operações remotas:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest tests.test_validacao_storage -v
+.\.venv\Scripts\python.exe -m unittest discover -v
 ```

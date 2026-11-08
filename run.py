@@ -10,11 +10,13 @@ from flask import Flask, abort, flash, g, redirect, render_template, request, ur
 from flask_wtf.csrf import CSRFError, CSRFProtect
 from httpx import HTTPError
 from postgrest.exceptions import APIError
+from storage3.exceptions import StorageApiError
 from supabase import AuthApiError, AuthError, ClientOptions, SupabaseException, create_client
 from supabase_auth.types import SignUpWithEmailAndPasswordCredentials
 
 from app.forms import AnimalForm, CadastroForm, LoginForm
 from app.auth import INDISPONIVEL, registrar_auth
+from app.fotos import FotoInvalida, processar_foto
 
 load_dotenv(Path(__file__).with_name(".env"))
 
@@ -36,6 +38,9 @@ app.config.update(
 
 @app.before_request
 def verificar_configuracao_csrf():
+    if request.endpoint == "anunciar":
+        # Uma imagem de até 3 MiB mais campos e envelope multipart.
+        request.max_content_length = 4 * 1024 * 1024
     if request.endpoint in ("login", "minha_conta", "logout", "anunciar") and not app.secret_key:
         return render_template("login.html", indisponivel=True,
                                mensagem="Acesso à conta indisponível no momento. Tente novamente mais tarde."), 503
@@ -46,6 +51,12 @@ def verificar_configuracao_csrf():
 
 registrar_auth(app)
 CSRFProtect(app)
+
+
+@app.errorhandler(413)
+def arquivo_grande(error):
+    return render_template("anunciar.html", form=AnimalForm(OPCOES_FILTROS, formdata=None),
+                           mensagem="O envio excedeu o limite de 4 MiB. Use uma fotografia de até 3 MiB e preencha o formulário novamente."), 413
 
 
 @app.errorhandler(CSRFError)
@@ -171,6 +182,16 @@ def anunciar():
         return render_template("anunciar.html", form=form)
     if not form.validate_on_submit():
         return render_template("anunciar.html", form=form), 400
+    foto = None
+    try:
+        arquivos = request.files.getlist("foto")
+        if len(arquivos) > 1:
+            raise FotoInvalida("Envie apenas uma fotografia nesta etapa.")
+        if form.foto.data:
+            foto = processar_foto(form.foto.data)
+    except FotoInvalida as erro:
+        form.foto.errors.append(str(erro))
+        return render_template("anunciar.html", form=form), 400
     mensagem = "Não foi possível salvar o rascunho agora. Tente novamente mais tarde."
     try:
         # set_session no cliente desta requisição envia o JWT validado/renovado
@@ -189,6 +210,50 @@ def anunciar():
         return render_template("anunciar.html", form=form, mensagem=mensagem), 503
     except (HTTPError, SupabaseException, ValueError, TypeError):
         return render_template("anunciar.html", form=form, mensagem=mensagem), 503
+    if foto is not None:
+        etapa = "reserva"
+        try:
+            resposta = g.auth_cliente.table("animal_fotos").insert({
+                "animal_id": animal["id"], "posicao": 1,
+            }).execute()
+            reservas = resposta.data
+            if not isinstance(reservas, list) or len(reservas) != 1:
+                raise ValueError("Reserva não confirmada")
+            reserva = reservas[0]
+            if (not isinstance(reserva, dict) or reserva.get("animal_id") != animal["id"]
+                    or reserva.get("posicao") != 1 or reserva.get("estado") != "pendente"):
+                raise ValueError("Reserva inválida")
+            foto_id = str(UUID(str(reserva.get("id"))))
+            caminho = f"{g.usuario.id}/{animal['id']}/{foto_id}.webp"
+            etapa = "upload"
+            g.auth_cliente.storage.from_("animal-fotos").upload(caminho, foto.conteudo, {
+                "content-type": "image/webp", "upsert": "false", "cache-control": "0",
+            })
+            etapa = "confirmação"
+            g.auth_cliente.rpc("confirmar_foto", {"p_foto_id": foto_id}).execute()
+            # A RPC retorna void. Só apresentar conclusão após ler pronta;
+            # removendo pode ter sido solicitado em outra sessão do usuário.
+            registros = g.auth_cliente.table("animal_fotos").select(
+                "id,animal_id,posicao,estado").eq("id", foto_id).execute().data
+            if (not isinstance(registros, list) or len(registros) != 1
+                    or registros[0] != dict(id=foto_id, animal_id=animal["id"], posicao=1, estado="pronta")):
+                raise ValueError("Fotografia pronta não confirmada")
+        except (APIError, StorageApiError, HTTPError, SupabaseException, ValueError, TypeError):
+            # Não apagar reserva/objeto nem reenviar: uma resposta perdida pode
+            # corresponder a uma operação concluída. A posição continua ocupada.
+            avisos = {
+                "reserva": "Não foi possível confirmar a reserva da fotografia; o envio não foi iniciado.",
+                "upload": "O envio da fotografia falhou ou não pôde ser confirmado.",
+                "confirmação": "A fotografia foi enviada, mas não foi possível confirmar que está pronta.",
+            }
+            flash("O rascunho foi criado. " + avisos[etapa] +
+                  " A fotografia não foi confirmada como adicionada. Pode haver uma reserva ou arquivo "
+                  "aguardando recuperação, ainda indisponível pela interface. Não reenvie o formulário "
+                  "para tentar adicionar a foto, pois isso criaria outro anúncio.", "rascunho-aviso")
+            return redirect(url_for("minha_conta"))
+        flash("Animal cadastrado como rascunho, com fotografia adicionada! O anúncio ainda não é público.",
+              "rascunho-sucesso")
+        return redirect(url_for("minha_conta"))
     flash("Animal cadastrado como rascunho! Você poderá adicionar fotos e solicitar "
           "a publicação posteriormente.", "rascunho-sucesso")
     return redirect(url_for("minha_conta"))

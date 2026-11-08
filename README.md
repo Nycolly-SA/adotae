@@ -16,7 +16,7 @@ O fluxo de confirmação pela rota `/auth/confirm` foi validado manualmente: o s
 
 Em `/login`, usuários com e-mail confirmado podem entrar. A sessão permanece entre requisições, com renovação dos tokens expirados quando possível. `/minha-conta` exige autenticação e apresenta uma saudação e o botão “Sair”, que envia um POST protegido por CSRF. A navegação oferece “Entrar” ou “Minha conta” conforme a identidade validada. Recuperação de senha, edição de perfil e gerenciamento de anúncios ainda não foram implementados.
 
-Em `/minha-conta`, o link “Anunciar animal” abre `/anunciar`. Usuários autenticados com e-mail confirmado podem preencher os dados do animal e salvar um rascunho no Supabase, sem fotos e com contatos opcionais. O formulário usa Flask-WTF, CSRF e validação no servidor, reutilizando as opções do catálogo. Campos opcionais vazios viram NULL; o detalhe de espécie é obrigatório apenas para “Outro animal doméstico”. Após sucesso, a aplicação redireciona para a conta com uma mensagem temporária. Fotografias, publicação, moderação, edição, exclusão e listagem de anúncios próprios ainda não estão disponíveis.
+Em `/minha-conta`, o link “Anunciar animal” abre `/anunciar`. Usuários autenticados com e-mail confirmado podem preencher os dados do animal e salvar um rascunho no Supabase, com uma fotografia opcional e contatos opcionais. O formulário usa Flask-WTF, CSRF e validação no servidor, reutilizando as opções do catálogo. Campos opcionais vazios viram NULL; o detalhe de espécie é obrigatório apenas para “Outro animal doméstico”. Após o envio, a aplicação redireciona para a conta com uma mensagem temporária de sucesso ou aviso de falha parcial. Publicação, moderação, edição, exclusão e listagem de anúncios próprios ainda não estão disponíveis.
 
 O INSERT usa o cliente isolado da requisição: chave publicável em `apikey` e JWT do usuário validado (ou renovado) em `Authorization`, respeitando a RLS. Envia apenas as colunas permitidas, deixando proprietário, estados, ID e datas para o banco. O sucesso exige retorno de um registro com UUID válido, estado `rascunho` e proprietário igual ao usuário autenticado. Esta implementação foi testada offline com o SDK real e HTTP simulado. Conforme a validação manual realizada em `adotae-testes`, o login com conta `.test` e o cadastro de um animal fictício pelo navegador funcionaram; o registro foi confirmado no PostgreSQL com proprietário e estados iniciais corretos. A consulta anônima pela Data API não retornou o rascunho. O registro fictício foi excluído e a tabela de testes ficou novamente vazia.
 
@@ -35,11 +35,39 @@ A leitura pública permite expor `usuario_id`; essa decisão precisa de revisão
 antes da API pública definitiva. Publicação e moderação ainda não têm mecanismo
 implementado.
 
+O módulo `app/fotos.py` oferece `processar_foto(arquivo)` para um `FileStorage`
+do Flask, retornando `FotoProcessada` com `conteudo` (bytes), `content_type`,
+`largura` e `altura`. O tamanho para upload é `len(resultado.conteudo)` e a
+extensão é `.webp`. Erros de validação geram `FotoInvalida` com mensagem amigável.
+O processamento é em memória: valida o conteúdo JPEG/PNG/WebP de até 3 MiB,
+corrige EXIF, preserva transparência, remove metadados e limita o maior lado a
+1600 pixels e a saída a 512.000 bytes. Rejeita animações, mais de 20 megapixels
+ou lados acima de 10.000 pixels antes de decodificar. Tenta qualidades de 85 a
+45 e, se necessário, reduz proporcionalmente as dimensões em 20%, até o maior
+lado chegar a 320 pixels; se ainda não couber, rejeita. Imagens menores não são
+ampliadas. `/anunciar` processa a fotografia antes de criar o animal e aceita
+somente uma por envio, com corpo HTTP limitado a 4 MiB. Usa exclusivamente o
+cliente autenticado para reservar a posição 1, enviar WebP ao bucket privado
+`animal-fotos` sem sobrescrita e chamar `confirmar_foto`. O caminho usa os IDs
+reais de usuário, animal e reserva. O sucesso exige também a leitura do estado
+`pronta`; não há exibição de fotos no catálogo demonstrativo.
+
+Se a reserva, o upload ou a confirmação falhar, o rascunho permanece e a conta
+exibe um aviso específico, sem anunciar a foto como adicionada. Respostas
+perdidas podem deixar uma reserva pendente, um arquivo vinculado sem confirmação
+ou uma confirmação concluída cujo resultado não foi recebido. Não há exclusão
+ou repetição automática dessas operações. A reserva continua ocupando a posição
+e a recuperação ainda não está disponível pela interface; reenviar o formulário
+criaria outro anúncio. O upload usa cache-control zero, sujeito à
+[ressalva de cache documentada](supabase/README.md#validação-do-storage-e-limitação-de-cache).
+Esta integração foi validada apenas por testes offline.
+
 ## Tecnologias
 
 - Python e Flask
 - HTML, CSS e JavaScript
 - Supabase Auth (SDK oficial Python), python-dotenv e Flask-WTF
+- Pillow para processamento de fotografias em memória
 
 ## Como executar
 
@@ -101,9 +129,12 @@ Os testes verificam páginas, catálogo, arquivos estáticos, cadastro, confirma
 
 No Linux ou macOS, use `.venv/bin/python -m unittest discover -v`.
 
-Nesta revisão, a suíte local passou com 87 testes, incluindo 12 testes de cadastro
+Os testes incluem cadastro
 de rascunhos (validação, CSRF, payload, JWT, falhas e preservação do catálogo) e os testes offline do
 [roteiro da Data API](supabase/tests/validar_data_api.py), em
 [tests/test_validacao_data_api.py](tests/test_validacao_data_api.py).
 Esses testes usam mocks e não comprovam as políticas instaladas no Supabase.
 Os resultados remotos são registrados separadamente no README do banco.
+Os testes de fotografias em `tests/test_fotos.py` geram imagens em memória e
+cobrem formatos, transparência, EXIF, redimensionamento, corrupção e limites,
+sem serviços externos.
