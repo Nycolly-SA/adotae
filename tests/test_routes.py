@@ -1,8 +1,14 @@
+import copy
+import json
 import unittest
+
+import httpx
+from supabase import create_client
 from html.parser import HTMLParser
 from unittest.mock import patch
 
 from run import ANIMAIS, app
+from tests.test_login import jwt, user
 
 
 class PageParser(HTMLParser):
@@ -47,6 +53,60 @@ class RouteTests(unittest.TestCase):
         self.addCleanup(app.config.update, original_config)
         app.config.update(TESTING=True, SECRET_KEY="test-only-secret")
         self.client = app.test_client()
+        app.config.update(SUPABASE_URL="https://example.supabase.co",
+                          SUPABASE_PUBLISHABLE_KEY="sb_publishable_test")
+        self.calls = []
+        self.failure = None
+        self.payload = None
+        self.override_payload = False
+        self.rows = []
+        for index, (nome, especie, sexo, idade, porte, distrito) in enumerate((
+            ("Bento", "Cachorro", "Macho", "2 anos", "Médio", "São João da Barra (sede)"),
+            ("Luna", "Gato", "Fêmea", "1 ano", "Pequeno", "Atafona"),
+            ("Paçoca", "Cachorro", "Macho", "6 meses", "Pequeno", "Grussaí"),
+            ("Amora", "Gato", "Fêmea", "3 anos", "Pequeno", "Barcelos"),
+        ), 1):
+            self.rows.append(dict(id=f"00000000-0000-0000-0000-{index:012d}", nome=nome,
+                especie=especie, sexo=sexo, idade_aproximada=idade, porte=porte,
+                distrito=distrito, descricao="Descrição pública.", criado_em=f"2026-11-0{5-index}T00:00:00Z",
+                status_publicacao="publicado", status_adocao="disponivel", oculto_admin=False,
+                usuario_id=user()["id"], email_contato="private-contact@example.test", whatsapp="5522999999999"))
+
+        def transport(request):
+            self.calls.append(request)
+            if request.url.path.endswith("/user"):
+                return httpx.Response(200, json=user())
+            self.assertEqual(request.url.path, "/rest/v1/animais")
+            self.assertEqual(request.method, "GET")
+            if self.failure == "network":
+                raise httpx.ConnectError("private provider details sb_publishable_test")
+            if self.failure == "invalid-json":
+                return httpx.Response(200, text="private provider details")
+            if self.failure:
+                return httpx.Response(self.failure, json=dict(code="42501", message="private provider details"))
+            if self.override_payload:
+                return httpx.Response(200, content=json.dumps(self.payload), headers={"Content-Type": "application/json"})
+            rows = copy.deepcopy(self.rows)
+            for campo, value in request.url.params.multi_items():
+                if value.startswith("eq."):
+                    rows = [row for row in rows if str(row[campo]).lower() == value[3:].lower()]
+            if request.url.params.get("order") == "criado_em.desc":
+                rows.sort(key=lambda row: row["criado_em"], reverse=True)
+            campos = request.url.params.get("select", "*").split(",")
+            if campos != ["*"]:
+                rows = [{campo: row[campo] for campo in campos} for row in rows]
+            return httpx.Response(200, json=rows)
+
+        def factory(url, key, options):
+            self.assertFalse(options.persist_session)
+            self.assertFalse(options.auto_refresh_token)
+            options.httpx_client = httpx.Client(transport=httpx.MockTransport(transport))
+            self.addCleanup(options.httpx_client.close)
+            return create_client(url, key, options=options)
+
+        patcher = patch("app.auth.create_client", side_effect=factory)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def test_home_presents_project_and_catalog_link(self):
         response = self.client.get("/")
@@ -59,23 +119,15 @@ class RouteTests(unittest.TestCase):
         self.assertIn("/animais", page.links)
         self.assertEqual(page.heading_count, 1)
 
-    def test_catalog_presents_four_fictional_animals(self):
-        response = self.client.get("/animais")
-        self.assertEqual(response.status_code, 200)
-        html = response.get_data(as_text=True)
-        for name in ("Bento", "Luna", "Paçoca", "Amora"):
-            with self.subTest(name=name):
-                self.assertIn(name, html)
-        self.assertIn("fictícios", html)
-        page = PageParser()
-        page.feed(html)
+    def test_catalog_presents_public_animals_without_demo_images_or_details(self):
+        html, page = self.assert_catalog({}, ("Bento", "Luna", "Paçoca", "Amora"))
         self.assertEqual(page.heading_count, 1)
-        self.assertEqual(len(page.images), 4)
-        for animal_image in page.images:
-            with self.subTest(image=animal_image.get("src")):
-                self.assertTrue(animal_image.get("alt"))
-                with self.client.get(animal_image["src"]) as image_response:
-                    self.assertEqual(image_response.status_code, 200)
+        self.assertEqual(page.images, [])
+        self.assertEqual(html.count("Fotografia temporariamente indisponível"), 4)
+        self.assertIn("Detalhes e contato ainda indisponíveis", html)
+        self.assertNotIn("os animais e os dados são fictícios", html)
+        self.assertIn("dados de validação podem ser fictícios", html)
+        self.assertIn("2 anos", html)
 
     def assert_catalog(self, query, names):
         response = self.client.get("/animais", query_string=query)
@@ -91,7 +143,7 @@ class RouteTests(unittest.TestCase):
         )
         page = PageParser()
         page.feed(html)
-        self.assertEqual(len(page.images), count)
+        self.assertEqual(html.count('class="animal-card"'), count)
         return html, page
 
     def test_catalog_filter_options_default_to_all(self):
@@ -108,17 +160,14 @@ class RouteTests(unittest.TestCase):
                 self.assertEqual([option["value"] for option in page.selects[name]], values)
                 self.assertEqual([option["value"] for option in page.selects[name] if "selected" in option], [""])
 
-    def test_catalog_links_to_each_animal_even_after_filtering(self):
-        cases = (({}, [1, 2, 3, 4]), ({"tipo": "Gato"}, [2, 4]),
-                 ({"distrito": "Grussaí"}, [3]), ({"porte": "Grande"}, []))
-        for query, ids in cases:
+    def test_catalog_has_no_links_to_demo_details_even_after_filtering(self):
+        for query in ({}, {"tipo": "Gato"}, {"distrito": "Grussaí"}, {"porte": "Grande"}):
             with self.subTest(query=query):
-                html = self.client.get("/animais", query_string=query).get_data(as_text=True)
+                html = self.client.get("/animais", query_string=query).text
                 page = PageParser()
                 page.feed(html)
-                self.assertEqual([link for link in page.links if link.startswith("/animais/")],
-                                 [f"/animais/{animal_id}" for animal_id in ids])
-                self.assertEqual(html.count(">Ver detalhes</a>"), len(ids))
+                self.assertFalse(any(link.startswith("/animais/") for link in page.links))
+                self.assertNotIn("Ver detalhes", html)
 
     def test_details_present_each_animals_data_and_existing_image(self):
         cases = (
@@ -213,7 +262,7 @@ class RouteTests(unittest.TestCase):
         response = self.client.get(page.clear_link)
         cleared = PageParser()
         cleared.feed(response.get_data(as_text=True))
-        self.assertEqual(len(cleared.images), 4)
+        self.assertEqual(response.text.count('class="animal-card"'), 4)
         for options in cleared.selects.values():
             self.assertEqual([option["value"] for option in options if "selected" in option], [""])
 
@@ -245,6 +294,115 @@ class RouteTests(unittest.TestCase):
                 with self.client.get(path) as response:
                     self.assertEqual(response.status_code, 200)
                     self.assertTrue(response.data)
+
+    def catalog_calls(self):
+        return [r for r in self.calls if r.url.path == "/rest/v1/animais"]
+
+    def test_public_query_is_anonymous_explicit_and_newest_first(self):
+        self.rows.reverse()
+        html, _ = self.assert_catalog({}, ("Bento", "Luna", "Paçoca", "Amora"))
+        call = self.catalog_calls()[-1]
+        self.assertEqual(dict(call.url.params), dict(
+            select="id,nome,especie,sexo,idade_aproximada,porte,descricao,distrito",
+            status_publicacao="eq.publicado", status_adocao="eq.disponivel",
+            oculto_admin="eq.false", order="criado_em.desc"))
+        self.assertEqual(call.headers["apikey"], "sb_publishable_test")
+        self.assertEqual(call.headers["authorization"], "Bearer sb_publishable_test")
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(sorted((html.index(f">{name}</h2>"), name) for name in
+                              ("Bento", "Luna", "Paçoca", "Amora")),
+                         [(html.index(f">{name}</h2>"), name) for name in
+                          ("Bento", "Luna", "Paçoca", "Amora")])
+
+    def test_authenticated_catalog_uses_same_public_query_and_visibility(self):
+        for field, value in (("status_publicacao", "rascunho"),
+                             ("status_adocao", "adotado"), ("oculto_admin", True)):
+            self.rows.append(dict(self.rows[0], nome="Privado " + field, **{field: value}))
+        visitor = self.client.get("/animais")
+        public_call = self.catalog_calls()[-1]
+        access = jwt()
+        self.client.set_cookie("adotae_access", access)
+        self.client.set_cookie("adotae_refresh", "private-refresh")
+        authenticated = self.client.get("/animais")
+        self.assertEqual(authenticated.status_code, 200)
+        self.assertIn("Minha conta", authenticated.text)
+        for response in (visitor, authenticated):
+            self.assertIn("4 animais encontrados", response.text)
+            self.assertNotIn("Privado ", response.text)
+        call = self.catalog_calls()[-1]
+        self.assertEqual(call.url, public_call.url)
+        self.assertEqual(call.headers.get("authorization"), public_call.headers.get("authorization"))
+        self.assertEqual(call.headers["authorization"], "Bearer sb_publishable_test")
+        self.assertTrue(any(r.headers.get("authorization") == "Bearer " + access
+                            for r in self.calls if r.url.path.endswith("/user")))
+
+    def test_filters_are_sent_to_api_individually_and_combined(self):
+        for query in ({"tipo": "Gato"}, {"porte": "Pequeno"}, {"distrito": "Atafona"},
+                      {"tipo": "Gato", "porte": "Pequeno", "distrito": "Atafona"},
+                      {"tipo": "Dragão", "porte": "Pequeno", "extra": "ignorar"}):
+            with self.subTest(query=query):
+                self.assertEqual(self.client.get("/animais", query_string=query).status_code, 200)
+                params = self.catalog_calls()[-1].url.params
+                expected = {"especie": "eq.Gato"} if query.get("tipo") == "Gato" else {}
+                expected.update({k: "eq." + query[k] for k in ("porte", "distrito") if k in query})
+                self.assertEqual({k: params[k] for k in ("especie", "porte", "distrito") if k in params}, expected)
+                self.assertNotIn("extra", params)
+
+    def test_legitimately_empty_catalog(self):
+        self.rows = []
+        html, _ = self.assert_catalog({}, ())
+        self.assertIn("Nenhum animal encontrado", html)
+        self.assertNotIn("Catálogo indisponível", html)
+
+    def assert_unavailable(self):
+        response = self.client.get("/animais")
+        self.assertEqual(response.status_code, 503)
+        self.assertIn("Catálogo indisponível", response.text)
+        for value in ("Nenhum animal encontrado", "0 animais encontrados", "private", "sb_publishable_test"):
+            self.assertNotIn(value, response.text)
+        return response
+
+    def test_api_failures_do_not_look_like_empty_catalog(self):
+        for failure in (401, 403, 500, "network", "invalid-json"):
+            with self.subTest(failure=failure):
+                self.failure = failure
+                self.assert_unavailable()
+
+    def test_missing_or_invalid_configuration(self):
+        for field, value in (("SUPABASE_URL", ""), ("SUPABASE_PUBLISHABLE_KEY", ""),
+                             ("SUPABASE_URL", "invalid")):
+            with self.subTest(field=field, value=value), patch.dict(app.config, {field: value}):
+                self.assert_unavailable()
+        self.assertEqual(self.calls, [])
+
+    def test_unexpected_records_fail_without_rendering_partial_results(self):
+        row = {k: self.rows[0][k] for k in (
+            "id", "nome", "especie", "sexo", "idade_aproximada", "porte", "descricao", "distrito")}
+        invalid_rows = [None, "private", {}, dict(row, id="invalid"), dict(row, id=123),
+                        dict(row, especie="Dragão"), dict(row, sexo="invalid"),
+                        dict(row, porte="Gigante"), dict(row, distrito="invalid")]
+        for field in row:
+            invalid_rows.extend(({k: v for k, v in row.items() if k != field},
+                                 dict(row, **{field: None}), dict(row, **{field: []}),
+                                 dict(row, **{field: " "})))
+        invalid_rows.extend((dict(row, nome="x" * 101), dict(row, idade_aproximada="x" * 51),
+                             dict(row, descricao="x" * 2001)))
+        self.override_payload = True
+        for payload in (None, {}, "private", 42, *([row, invalid] for invalid in invalid_rows)):
+            with self.subTest(payload=payload):
+                self.payload = payload
+                response = self.assert_unavailable()
+                self.assertNotIn('class="animal-card"', response.text)
+
+    def test_no_private_fields_and_html_is_escaped(self):
+        self.rows[0]["nome"] = '<script>alert("x")</script>'
+        response = self.client.get("/animais")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("&lt;script&gt;", response.text)
+        self.assertNotIn('<script>alert(', response.text)
+        for value in ("private-contact", "5522999999999", "usuario_id", "email_contato",
+                      "whatsapp", "sb_publishable_test"):
+            self.assertNotIn(value, response.text)
 
 
 if __name__ == "__main__":

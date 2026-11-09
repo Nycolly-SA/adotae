@@ -8,9 +8,9 @@
             <h1 id="titulo-catalogo">Cada focinho, uma história.</h1>
             <p>Uma pequena apresentação de quem poderia fazer parte da sua vida.</p>
         </div>
-        <span class="catalog-count">{{ animais|length }} {{ 'animal encontrado' if animais|length == 1 else 'animais encontrados' }}</span>
+        {% if not indisponivel %}<span class="catalog-count">{{ animais|length }} {{ 'animal encontrado' if animais|length == 1 else 'animais encontrados' }}</span>{% endif %}
     </div>
-    <div class="catalog-notice"><span class="note-symbol" aria-hidden="true">i</span><p>Catálogo demonstrativo: os animais e os dados são fictícios. Ainda não é possível solicitar uma adoção por aqui.</p></div>
+    <div class="catalog-notice"><span class="note-symbol" aria-hidden="true">i</span><p>Projeto acadêmico: os dados de validação podem ser fictícios. Detalhes e contato ainda indisponíveis nesta etapa.</p></div>
     <form method="get" action="{{ url_for('animais') }}" class="catalog-filters">
         {% for campo, rotulo in [('tipo', 'Tipo de animal'), ('porte', 'Porte'), ('distrito', 'Distrito')] %}
         <div class="filter-field">
@@ -28,23 +28,28 @@
             <a href="{{ url_for('animais') }}" class="filter-clear">Limpar</a>
         </div>
     </form>
-    {% if animais %}
+    {% if indisponivel %}
+    <div class="catalog-empty" role="alert">
+        <h2>Catálogo indisponível</h2>
+        <p>Não foi possível consultar os anúncios agora. Tente novamente mais tarde.</p>
+    </div>
+    {% elif animais %}
     <div class="animal-grid">
         {% for animal in animais %}
         <article class="animal-card" aria-labelledby="animal-{{ animal.id }}">
-            <div class="card-image">
-                <img src="{{ url_for('static', filename='images/' ~ animal.imagem) }}" alt="{{ animal.imagem_alt }}" width="480" height="400" loading="lazy">
+            <div class="card-image card-image-unavailable">
+                <p>Fotografia temporariamente indisponível</p>
                 <span class="species-tag">{{ animal.especie }}</span>
             </div>
             <div class="card-body">
                 <h2 id="animal-{{ animal.id }}">{{ animal.nome }}</h2>
                 <dl class="animal-facts">
-                    <div><dt>Idade</dt><dd>{{ animal.idade }}</dd></div>
+                    <div><dt>Idade</dt><dd>{{ animal.idade_aproximada }}</dd></div>
                     <div><dt>Porte</dt><dd>{{ animal.porte }}</dd></div>
                     <div><dt>Sexo</dt><dd>{{ animal.sexo }}</dd></div>
                 </dl>
                 <p>{{ animal.descricao }}</p>
-                <a class="text-link" href="{{ url_for('animal_detalhes', id=animal.id) }}" aria-label="Ver detalhes de {{ animal.nome }}">Ver detalhes</a>
+                <p class="card-district">{{ animal.distrito }}</p>
             </div>
         </article>
         {% endfor %}

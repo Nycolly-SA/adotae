@@ -15,7 +15,7 @@ from supabase import AuthApiError, AuthError, ClientOptions, SupabaseException, 
 from supabase_auth.types import SignUpWithEmailAndPasswordCredentials
 
 from app.forms import AnimalForm, CadastroForm, FotoForm, LoginForm
-from app.auth import INDISPONIVEL, registrar_auth
+from app.auth import INDISPONIVEL, novo_cliente, registrar_auth
 from app.fotos import FotoInvalida, processar_foto
 
 load_dotenv(Path(__file__).with_name(".env"))
@@ -126,7 +126,7 @@ def cadastro():
     # Não guardar nem retornar usuário, sessão ou tokens recebidos do provedor.
     return render_template("cadastro.html", confirmacao=confirmacao)
 
-# Dados temporários para apresentar a interface. Não representam animais reais.
+# Dados fictícios mantidos apenas para compatibilidade da rota de detalhes demonstrativa.
 ANIMAIS = [
     {
         "id": 1,
@@ -526,18 +526,47 @@ def animais():
         valor = request.args.get(campo, "")
         filtros[campo] = valor if valor in opcoes else ""
 
-    animais_filtrados = [
-        animal for animal in ANIMAIS
-        if (not filtros["tipo"] or animal["especie"] == filtros["tipo"])
-        and (not filtros["porte"] or animal["porte"] == filtros["porte"])
-        and (not filtros["distrito"] or animal["distrito"] == filtros["distrito"])
-    ]
-    return render_template(
-        "animais.html",
-        animais=animais_filtrados,
-        filtros=filtros,
-        opcoes_filtros=OPCOES_FILTROS,
-    )
+    contexto = dict(filtros=filtros, opcoes_filtros=OPCOES_FILTROS)
+    try:
+        # Cliente novo, sem restaurar sessão: a RLS de proprietário também
+        # permite ler rascunhos, mas o catálogo deve ter sempre acesso anônimo.
+        cliente = novo_cliente()
+        consulta = (cliente.table("animais")
+                    .select("id,nome,especie,sexo,idade_aproximada,porte,descricao,distrito")
+                    .eq("status_publicacao", "publicado")
+                    .eq("status_adocao", "disponivel").eq("oculto_admin", False))
+        for parametro, coluna in (("tipo", "especie"), ("porte", "porte"), ("distrito", "distrito")):
+            if filtros[parametro]:
+                consulta = consulta.eq(coluna, filtros[parametro])
+        registros = consulta.order("criado_em", desc=True).execute().data
+        animais_publicos = validar_catalogo(registros)
+    except (APIError, HTTPError, SupabaseException, ValueError, TypeError):
+        return render_template("animais.html", **contexto, indisponivel=True), 503
+    return render_template("animais.html", **contexto, animais=animais_publicos)
+
+
+def validar_catalogo(registros):
+    """Recusa respostas incompletas e limita os dados enviados ao template."""
+    if not isinstance(registros, list):
+        raise ValueError("Resposta de catálogo inválida")
+    limites = dict(id=36, nome=100, especie=30, sexo=5, idade_aproximada=50,
+                   porte=7, descricao=2000, distrito=30)
+    animais = []
+    for registro in registros:
+        if not isinstance(registro, dict) or any(
+            not isinstance(registro.get(campo), str)
+            or not registro[campo].strip() or len(registro[campo]) > limite
+            for campo, limite in limites.items()
+        ):
+            raise ValueError("Registro de catálogo inválido")
+        UUID(registro["id"])
+        if (registro["especie"] not in OPCOES_FILTROS["tipo"]
+                or registro["porte"] not in OPCOES_FILTROS["porte"]
+                or registro["distrito"] not in OPCOES_FILTROS["distrito"]
+                or registro["sexo"] not in ("Macho", "Fêmea")):
+            raise ValueError("Opções de catálogo inválidas")
+        animais.append({campo: registro[campo] for campo in limites})
+    return animais
 
 
 @app.get("/animais/<int:id>")

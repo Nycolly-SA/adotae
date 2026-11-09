@@ -44,6 +44,10 @@ class EditarTests(unittest.TestCase):
         def transport(request):
             self.calls.append(request)
             if request.url.path == "/rest/v1/animais":
+                if request.url.params.get("status_publicacao") == "eq.publicado":
+                    # A consulta pública anônima não pode retornar este rascunho.
+                    self.assertEqual(request.headers["authorization"], "Bearer sb_publishable_test")
+                    return httpx.Response(200, json=[])
                 if request.method == self.failure_method and self.failure:
                     if self.failure == "network":
                         raise httpx.ConnectError("private " + self.access)

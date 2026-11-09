@@ -115,6 +115,8 @@ h1, h2 { font-family: var(--heading-font); font-weight: 400; letter-spacing: -.0
 .animal-card { overflow: hidden; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; }
 .card-image { position: relative; }
 .card-image img { aspect-ratio: 6 / 5; object-fit: cover; }
+.card-image-unavailable { aspect-ratio: 6 / 5; display: flex; align-items: center; justify-content: center; padding: 24px 24px 52px; background: var(--sage-light); color: var(--green); text-align: center; }
+.card-image-unavailable p { margin: 0; font-size: 14px; }
 .species-tag { position: absolute; bottom: 12px; left: 14px; padding: 3px 12px; background: var(--background); color: var(--green); border-radius: 20px; font-size: 12px; font-weight: 600; }
 .card-body { padding: 21px; }
 .card-body h2 { font-size: 30px; margin-bottom: 16px; }
@@ -122,6 +124,7 @@ h1, h2 { font-family: var(--heading-font); font-weight: 400; letter-spacing: -.0
 .animal-facts dt { color: var(--muted); font-size: 11px; }
 .animal-facts dd { margin: 0; font-weight: 600; }
 .card-body p { font-size: 14px; color: var(--muted); margin-bottom: 0; }
+.card-body .card-district { margin-top: 16px; font-size: 12px; }
 .catalog-closing { margin: 34px 0 0; text-align: center; color: var(--muted); font-size: 13px; }
 .animal-detail { padding-block: 40px 60px; }
 .detail-back { margin-bottom: 24px; }

@@ -4,11 +4,13 @@ Projeto acadêmico de Engenharia de Software com o objetivo de facilitar a adoç
 
 ## Etapa atual
 
-Esta versão apresenta o projeto e um catálogo com quatro animais fictícios. O site se adapta a celulares e computadores. O catálogo permanece demonstrativo; os anúncios cadastrados e publicados no banco ainda não aparecem nele.
+Esta versão apresenta o projeto e um catálogo integrado aos anúncios publicados no Supabase. O site se adapta a celulares e computadores. O projeto é acadêmico e os dados utilizados na validação podem ser fictícios.
 
-Em `/animais`, é possível combinar filtros por tipo de animal, porte e distrito. Use “Aplicar filtros” para consultar e “Limpar” para voltar ao catálogo completo. Os filtros são enviados por parâmetros GET na URL.
+Em `/animais`, visitantes e usuários autenticados consultam os mesmos anúncios públicos, com um cliente anônimo novo, chave publicável e sem sessão ou JWT de usuário, respeitando a RLS. A consulta exige `status_publicacao = 'publicado'`, `status_adocao = 'disponivel'` e `oculto_admin = false`, com ordem de criação decrescente. Seleciona apenas UUID, nome, espécie, sexo, idade aproximada, porte, descrição e distrito; não consulta contatos nem `usuario_id`.
 
-Cada cartão oferece “Ver detalhes”, que abre `/animais/<id>` com a imagem, os dados e a descrição do animal, além de um link de volta ao catálogo. A seção de contato é apenas demonstrativa, sem contatos ou ações funcionais. Identificadores inexistentes retornam HTTP 404.
+É possível combinar filtros por tipo de animal, porte e distrito. Use “Aplicar filtros” para consultar e “Limpar” para voltar ao catálogo completo. Os parâmetros GET são validados pelas opções existentes e aplicados na consulta ao Supabase. Valores desconhecidos são ignorados. A contagem corresponde aos cartões retornados. Uma consulta sem anúncios exibe o catálogo vazio; falhas de conexão, configuração ou resposta inválida retornam HTTP 503 com aviso de indisponibilidade, sem contagem enganosa. Os registros são validados antes da renderização.
+
+Os cartões usam uma apresentação neutra com “Fotografia temporariamente indisponível”. Leitura pública de fotografias, detalhes com UUID e contato para adoção continuam pendentes; não há “Ver detalhes” nos anúncios reais. A rota `/animais/<int:id>` foi preservada apenas para compatibilidade da demonstração, com quatro animais fictícios, sem links no catálogo. Identificadores inexistentes retornam HTTP 404. Esta integração do catálogo possui testes offline com SDK real e HTTP simulado e foi validada manualmente em `adotae-testes`, conforme a seção de testes; nenhuma alteração de RLS ou migração foi necessária.
 
 Em `/cadastro`, é possível criar uma conta com nome, e-mail e senha de pelo menos 8 caracteres pelo Supabase Auth. O nome é enviado nos metadados `nome`. O formulário valida os dados no servidor e possui proteção CSRF. Após o envio, orienta a confirmação do e-mail, sem iniciar sessão.
 
@@ -22,7 +24,7 @@ Criação, fotografia e publicação são operações separadas. Falhas parciais
 
 **Testes automatizados da publicação direta:** o fluxo possui testes offline com SDK real e HTTP simulado. Em 08/11/2026, foram informados 212 testes Python aprovados na suíte completa (18 novos) e `git diff --check` sem erros. A revisão independente do diff não identificou problemas bloqueantes.
 
-**Testes manuais da publicação direta:** em 08/11/2026, pelo formulário `/anunciar` conectado ao Supabase `adotae-testes`, “Salvar como rascunho” funcionou sem contato e sem fotografia. “Publicar agora” recusou formulários sem os requisitos obrigatórios, sem criar anúncios. Um animal fictício com contato e fotografia foi cadastrado e publicado diretamente; a interface confirmou o status `publicado` e deixou de oferecer as opções “Editar”, “Fotografia” e “Publicar” para esse anúncio. Esta funcionalidade ainda não foi validada no ambiente principal. O catálogo permanece demonstrativo e a recuperação de fotografias incompletas continua pendente.
+**Testes manuais da publicação direta:** em 08/11/2026, pelo formulário `/anunciar` conectado ao Supabase `adotae-testes`, “Salvar como rascunho” funcionou sem contato e sem fotografia. “Publicar agora” recusou formulários sem os requisitos obrigatórios, sem criar anúncios. Um animal fictício com contato e fotografia foi cadastrado e publicado diretamente; a interface confirmou o status `publicado` e deixou de oferecer as opções “Editar”, “Fotografia” e “Publicar” para esse anúncio. Esta funcionalidade ainda não foi validada no ambiente principal. A recuperação de fotografias incompletas continua pendente.
 
 A seção “Meus anúncios” em `/minha-conta` consulta a Data API com o cliente autenticado da requisição, filtro explícito pelo proprietário e ordem de criação decrescente. Exibe nome, espécie, distrito e status de publicação, sem fotos, com as opções “Editar”, “Fotografia” e “Publicar” somente nos rascunhos. Lista vazia e falha de consulta têm mensagens distintas; em caso de indisponibilidade ou resposta inválida, a página preserva o logout e retorna HTTP 503. Os testes usam o SDK real com HTTP simulado. A listagem também foi validada manualmente no site conectado ao Supabase de testes, com resultados satisfatórios.
 
@@ -44,8 +46,7 @@ Na validação manual de 08/11/2026, pelo navegador conectado ao Supabase
 o status `publicado` e deixou de apresentar o botão “Publicar” para esse anúncio.
 A tentativa de publicar um rascunho sem os requisitos obrigatórios foi
 corretamente recusada. A funcionalidade ainda não foi validada no ambiente
-principal; o catálogo permanece
-demonstrativo, sem integração ao banco.
+principal.
 
 Em `/anuncios/<uuid>/editar`, o proprietário autenticado pode editar os dados de seus rascunhos, com as mesmas validações do cadastro e proteção CSRF. As fotografias permanecem intactas. Leitura e UPDATE filtram UUID, proprietário e status de rascunho; apenas os campos permitidos são enviados. A confirmação exige retorno válido com os dados salvos. Atualização sem registros retorna HTTP 409; falhas ou respostas inesperadas retornam HTTP 503, sem mensagem de sucesso. Anúncios inexistentes, de terceiros ou publicados retornam HTTP 404. As respostas usam `Cache-Control: no-store`. O fluxo foi validado offline com o SDK real e HTTP simulado.
 
@@ -68,7 +69,6 @@ dois usuários distintos e acesso anônimo. A limpeza temporária foi concluída
 No principal, a auditoria após correção dos privilégios passou em 10 de 10
 verificações, e a leitura anônima pela API retornou zero registros sem erro.
 A escrita autenticada pela API ainda não foi testada no principal.
-O catálogo continua demonstrativo, sem integração ao banco.
 
 Consulte [supabase/README.md](supabase/README.md) para os arquivos e limites.
 Habilitar tabelas na Data API pode alterar privilégios SQL e exige nova auditoria.
@@ -94,7 +94,7 @@ somente uma por envio, com corpo HTTP limitado a 4 MiB. Usa exclusivamente o
 cliente autenticado para reservar a posição 1, enviar WebP ao bucket privado
 `animal-fotos` sem sobrescrita e chamar `confirmar_foto`. O caminho usa os IDs
 reais de usuário, animal e reserva. O sucesso exige também a leitura do estado
-`pronta`; não há exibição de fotos no catálogo demonstrativo.
+`pronta`; a leitura pública de fotos no catálogo ainda não foi implementada.
 
 Se a reserva, o upload ou a confirmação falhar, o rascunho permanece e a conta
 exibe um aviso específico, sem anunciar a foto como adicionada. Respostas
@@ -139,7 +139,7 @@ Depois, abra **http://localhost:5000** no navegador. Para encerrar, pressione `C
 
 ### Configurar cadastro e login
 
-Copie `.env.example` para `.env` e preencha `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY` (chave publicável, nunca administrativa) e `SECRET_KEY`. Se já existir um `.env`, acrescente apenas as variáveis ausentes. Gere um segredo aleatório com `python -c "import secrets; print(secrets.token_hex(32))"` e use o mesmo valor em todas as instâncias da aplicação. Não publique o `.env`. Sem `SECRET_KEY`, os formulários e a conta ficam indisponíveis; sem as variáveis Supabase, as operações de autenticação ficam indisponíveis.
+Copie `.env.example` para `.env` e preencha `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY` (chave publicável, nunca administrativa) e `SECRET_KEY`. Se já existir um `.env`, acrescente apenas as variáveis ausentes. Gere um segredo aleatório com `python -c "import secrets; print(secrets.token_hex(32))"` e use o mesmo valor em todas as instâncias da aplicação. Não publique o `.env`. Sem `SECRET_KEY`, os formulários e a conta ficam indisponíveis; sem as variáveis Supabase, a autenticação e o catálogo ficam indisponíveis.
 
 Para executar em HTTP local, acrescente `ADOTAE_LOCAL_HTTP=true` ao `.env`. Em produção, omita essa variável ou use `false` e utilize HTTPS. Os cookies usam `Secure` por padrão; na Vercel, esse atributo é obrigatório mesmo que a opção local esteja presente. Configure as variáveis no ambiente da hospedagem. A implantação na Vercel ainda não foi validada.
 
@@ -184,3 +184,9 @@ Os resultados remotos são registrados separadamente no README do banco.
 Os testes de fotografias em `tests/test_fotos.py` geram imagens em memória e
 cobrem formatos, transparência, EXIF, redimensionamento, corrupção e limites,
 sem serviços externos.
+
+Os testes do catálogo em `tests/test_routes.py` usam o SDK real com HTTP simulado e cobrem consulta anônima também após login, campos selecionados, exclusão de rascunhos/adotados/ocultos, filtros individuais e combinados, valores desconhecidos, ordenação, contagem, catálogo vazio, falhas da API/configuração e registros inválidos. Verificam ainda escape do HTML, ausência de dados privados, de ilustrações fictícias e de links para detalhes demonstrativos. A suíte completa mantém os testes de cadastro, publicação e Minha conta. Esses testes offline não comprovam as políticas instaladas no Supabase.
+
+**Testes automatizados do catálogo público:** em 08/11/2026, foram informados 220 testes Python aprovados na suíte completa e `git diff --check` sem erros. A revisão independente não identificou problemas bloqueantes.
+
+**Testes manuais do catálogo público:** em 08/11/2026, com o site conectado ao Supabase `adotae-testes`, `/animais` exibiu corretamente os anúncios publicados sem login e também com usuário autenticado. Os filtros por espécie, porte e distrito funcionaram individualmente e combinados; rascunhos não apareceram no catálogo público. Os dados dos anúncios e a indicação de fotografia temporariamente indisponível foram exibidos corretamente, assim como a mensagem de catálogo vazio. A interface foi verificada em computador e celular. O catálogo ainda não foi validado no ambiente principal nesta etapa.

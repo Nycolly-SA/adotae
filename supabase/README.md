@@ -527,7 +527,10 @@ remotas e contagens anteriores não se aplicam à validação real do Storage.
 
 O arquivo [202611010001_create_animais.sql](migrations/202611010001_create_animais.sql)
 cria `public.animais` no Supabase PostgreSQL. A migração foi aplicada em
-`adotae-testes` e no projeto principal. O catálogo não está integrado ao banco.
+`adotae-testes` e no projeto principal. O catálogo agora consulta os anúncios
+públicos com cliente anônimo e filtros explícitos, sem contatos, proprietário
+ou fotografias. A integração Flask foi validada offline com SDK real e HTTP
+simulado; não houve nova migração, mudança de RLS ou validação remota nesta etapa.
 Os resultados remotos abaixo vêm do histórico informado; nesta revisão não
 foram executados SQL nem acessos ao Supabase.
 
