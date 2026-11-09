@@ -104,6 +104,10 @@ class EditarTests(unittest.TestCase):
         self.assertIn(f'action="{URL}"', page.text)
         self.assertNotIn('type="file"', page.text)
         self.assertNotIn("multipart/form-data", page.text)
+        self.assertIn(">Salvar alterações</button>", page.text)
+        self.assertNotIn("Salvar como rascunho", page.text)
+        self.assertNotIn("Publicar agora", page.text)
+        self.assertNotIn('name="acao"', page.text)
         query = self.calls[-1]
         self.assertEqual(query.url.params["id"], "eq." + ANIMAL_ID)
         self.assertEqual(query.url.params["usuario_id"], "eq." + self.identity["id"])

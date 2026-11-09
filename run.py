@@ -285,6 +285,12 @@ def publicar_anuncio(animal_id):
         flash("Este anúncio já está publicado.", "rascunho-aviso")
         return redirect(url_for("minha_conta"))
 
+    return executar_publicacao(animal_id)
+
+
+def executar_publicacao(animal_id):
+    """Publica uma única vez e informa o resultado confirmado da leitura própria."""
+    falhas = (APIError, HTTPError, SupabaseException, ValueError, TypeError)
     codigo = None
     try:
         # O PostgreSQL decide autorização e pré-requisitos. Nunca repetir a RPC:
@@ -307,7 +313,8 @@ def publicar_anuncio(animal_id):
               "rascunho-aviso")
     elif codigo == "42501":
         flash("Não foi possível publicar. Confira se o rascunho tem pelo menos um contato e uma "
-              "fotografia pronta e se está disponível para publicação.", "rascunho-aviso")
+              "fotografia pronta e se está disponível para publicação. Confira ‘Meus anúncios’.",
+              "rascunho-aviso")
     elif codigo == "55P03":
         flash("O anúncio está sendo utilizado em outra operação. Aguarde e confira ‘Meus anúncios’ "
               "antes de tentar novamente.", "rascunho-aviso")
@@ -447,17 +454,30 @@ def anunciar():
         return render_template("anunciar.html", form=form)
     if not form.validate_on_submit():
         return render_template("anunciar.html", form=form), 400
+    # POSTs antigos sem ação continuam salvando rascunhos.
+    acoes = request.form.getlist("acao")
+    if acoes and (len(acoes) != 1 or acoes[0] not in ("rascunho", "publicar")):
+        return render_template("anunciar.html", form=form,
+                               mensagem="Escolha Salvar como rascunho ou Publicar agora."), 400
+    publicar = acoes == ["publicar"]
+    if publicar and not (form.email_contato.data or form.whatsapp.data):
+        form.email_contato.errors.append("Para publicar, informe pelo menos um contato válido: e-mail ou WhatsApp.")
+        return render_template("anunciar.html", form=form), 400
     foto = None
     try:
         arquivos = request.files.getlist("foto")
         if len(arquivos) > 1:
             raise FotoInvalida("Envie apenas uma fotografia nesta etapa.")
+        if publicar and not form.foto.data:
+            raise FotoInvalida("Para publicar, selecione uma fotografia válida.")
         if form.foto.data:
             foto = processar_foto(form.foto.data)
     except FotoInvalida as erro:
         form.foto.errors.append(str(erro))
         return render_template("anunciar.html", form=form), 400
-    mensagem = "Não foi possível salvar o rascunho agora. Tente novamente mais tarde."
+    mensagem = ("Não foi possível confirmar a criação do rascunho. Confira ‘Meus anúncios’ "
+                "na sua conta antes de cadastrar outro animal. Não reenvie este formulário, "
+                "pois o cadastro pode ter sido concluído mesmo sem confirmação.")
     try:
         # set_session no cliente desta requisição envia o JWT validado/renovado
         # também à Data API. A chave publicável permanece no cabeçalho apikey.
@@ -480,9 +500,12 @@ def anunciar():
         if aviso:
             flash("O rascunho foi criado. " + aviso +
                   " A fotografia não foi confirmada como adicionada. Pode haver uma reserva ou arquivo "
-                  "aguardando recuperação, ainda indisponível pela interface. Não reenvie o formulário "
+                  "aguardando recuperação, ainda indisponível pela interface. Confira ‘Meus anúncios’. "
+                  "Não reenvie o formulário "
                   "para tentar adicionar a foto, pois isso criaria outro anúncio.", "rascunho-aviso")
             return redirect(url_for("minha_conta"))
+        if publicar:
+            return executar_publicacao(animal["id"])
         flash("Animal cadastrado como rascunho, com fotografia adicionada! O anúncio ainda não é público.",
               "rascunho-sucesso")
         return redirect(url_for("minha_conta"))

@@ -4,7 +4,7 @@ Projeto acadêmico de Engenharia de Software com o objetivo de facilitar a adoç
 
 ## Etapa atual
 
-Esta versão apresenta o projeto e um catálogo com quatro animais fictícios. O site se adapta a celulares e computadores. O catálogo permanece demonstrativo; os novos cadastros são salvos separadamente como rascunhos.
+Esta versão apresenta o projeto e um catálogo com quatro animais fictícios. O site se adapta a celulares e computadores. O catálogo permanece demonstrativo; os anúncios cadastrados e publicados no banco ainda não aparecem nele.
 
 Em `/animais`, é possível combinar filtros por tipo de animal, porte e distrito. Use “Aplicar filtros” para consultar e “Limpar” para voltar ao catálogo completo. Os filtros são enviados por parâmetros GET na URL.
 
@@ -16,7 +16,13 @@ O fluxo de confirmação pela rota `/auth/confirm` foi validado manualmente: o s
 
 Em `/login`, usuários com e-mail confirmado podem entrar. A sessão permanece entre requisições, com renovação dos tokens expirados quando possível. `/minha-conta` exige autenticação e apresenta uma saudação e o botão “Sair”, que envia um POST protegido por CSRF. A navegação oferece “Entrar” ou “Minha conta” conforme a identidade validada. A listagem dos próprios anúncios já funciona em `/minha-conta`; edição de anúncios publicados, exclusão, recuperação de senha e edição de perfil continuam pendentes.
 
-Em `/minha-conta`, o link “Anunciar animal” abre `/anunciar`. Usuários autenticados com e-mail confirmado podem preencher os dados do animal e salvar um rascunho no Supabase, com uma fotografia opcional e contatos opcionais. O formulário usa Flask-WTF, CSRF e validação no servidor, reutilizando as opções do catálogo. Campos opcionais vazios viram NULL; o detalhe de espécie é obrigatório apenas para “Outro animal doméstico”. Após o envio, a aplicação redireciona para a conta com uma mensagem temporária de sucesso ou aviso de falha parcial. A publicação ocorre depois, em “Meus anúncios”; moderação e exclusão ainda não estão disponíveis.
+Em `/minha-conta`, o link “Anunciar animal” abre `/anunciar`. Usuários autenticados com e-mail confirmado podem escolher “Salvar como rascunho”, com contato e fotografia opcionais, ou “Publicar agora”, que exige pelo menos um contato válido (e-mail ou WhatsApp) e exatamente uma fotografia válida. O formulário usa Flask-WTF, CSRF e validação no servidor, reutilizando as opções do catálogo. Campos opcionais vazios viram NULL; o detalhe de espécie é obrigatório apenas para “Outro animal doméstico”. A validação e o processamento da fotografia ocorrem antes de criar o registro. Após a criação confirmada do rascunho, a publicação direta usa `enviar_foto()` e só chama `publicar_anuncio` depois de confirmar a fotografia como `pronta`. O sucesso depende de uma nova leitura própria com estado `publicado`. A edição de rascunhos mantém apenas “Salvar alterações”. Moderação e exclusão ainda não estão disponíveis.
+
+Criação, fotografia e publicação são operações separadas. Falhas parciais preservam o rascunho e eventuais reservas ou arquivos; não há repetição automática nem exclusão para compensar falhas. Se o INSERT não puder ser confirmado, a aplicação não afirma que o anúncio foi criado e orienta conferir “Meus anúncios” antes de cadastrar outro animal. Se a fotografia falhar, a RPC de publicação não é chamada. Se a publicação não for comprovada, a conta mostra um aviso ou resultado incerto. A recuperação de reservas e arquivos incompletos ainda não está disponível pela interface.
+
+**Testes automatizados da publicação direta:** o fluxo possui testes offline com SDK real e HTTP simulado. Em 08/11/2026, foram informados 212 testes Python aprovados na suíte completa (18 novos) e `git diff --check` sem erros. A revisão independente do diff não identificou problemas bloqueantes.
+
+**Testes manuais da publicação direta:** em 08/11/2026, pelo formulário `/anunciar` conectado ao Supabase `adotae-testes`, “Salvar como rascunho” funcionou sem contato e sem fotografia. “Publicar agora” recusou formulários sem os requisitos obrigatórios, sem criar anúncios. Um animal fictício com contato e fotografia foi cadastrado e publicado diretamente; a interface confirmou o status `publicado` e deixou de oferecer as opções “Editar”, “Fotografia” e “Publicar” para esse anúncio. Esta funcionalidade ainda não foi validada no ambiente principal. O catálogo permanece demonstrativo e a recuperação de fotografias incompletas continua pendente.
 
 A seção “Meus anúncios” em `/minha-conta` consulta a Data API com o cliente autenticado da requisição, filtro explícito pelo proprietário e ordem de criação decrescente. Exibe nome, espécie, distrito e status de publicação, sem fotos, com as opções “Editar”, “Fotografia” e “Publicar” somente nos rascunhos. Lista vazia e falha de consulta têm mensagens distintas; em caso de indisponibilidade ou resposta inválida, a página preserva o logout e retorna HTTP 503. Os testes usam o SDK real com HTTP simulado. A listagem também foi validada manualmente no site conectado ao Supabase de testes, com resultados satisfatórios.
 
@@ -38,7 +44,7 @@ Na validação manual de 08/11/2026, pelo navegador conectado ao Supabase
 o status `publicado` e deixou de apresentar o botão “Publicar” para esse anúncio.
 A tentativa de publicar um rascunho sem os requisitos obrigatórios foi
 corretamente recusada. A funcionalidade ainda não foi validada no ambiente
-principal; `/anunciar` continua salvando somente rascunhos e o catálogo permanece
+principal; o catálogo permanece
 demonstrativo, sem integração ao banco.
 
 Em `/anuncios/<uuid>/editar`, o proprietário autenticado pode editar os dados de seus rascunhos, com as mesmas validações do cadastro e proteção CSRF. As fotografias permanecem intactas. Leitura e UPDATE filtram UUID, proprietário e status de rascunho; apenas os campos permitidos são enviados. A confirmação exige retorno válido com os dados salvos. Atualização sem registros retorna HTTP 409; falhas ou respostas inesperadas retornam HTTP 503, sem mensagem de sucesso. Anúncios inexistentes, de terceiros ou publicados retornam HTTP 404. As respostas usam `Cache-Control: no-store`. O fluxo foi validado offline com o SDK real e HTTP simulado.
@@ -70,7 +76,7 @@ A leitura pública permite expor `usuario_id`; essa decisão precisa de revisão
 antes da API pública definitiva. A migração SQL de publicação direta foi aplicada
 e validada em `adotae-testes` em 08/11/2026, com testes remotos funcionais e pontuais,
 sem reexecução integral da suíte SQL local. A validação do fluxo pela interface
-está registrada no trecho sobre “Publicar” acima.
+está registrada nos trechos sobre a publicação direta por `/anunciar` e sobre “Publicar” acima.
 Moderação continua pendente.
 
 O módulo `app/fotos.py` oferece `processar_foto(arquivo)` para um `FileStorage`
@@ -98,7 +104,7 @@ ou repetição automática dessas operações. A reserva continua ocupando a pos
 e a recuperação ainda não está disponível pela interface; reenviar `/anunciar`
 criaria outro anúncio. O upload usa cache-control zero, sujeito à
 [ressalva de cache documentada](supabase/README.md#validação-do-storage-e-limitação-de-cache).
-Esta integração foi validada apenas por testes offline.
+Esta integração possui testes offline e foi exercitada manualmente no fluxo de publicação direta por `/anunciar` em `adotae-testes`, conforme o registro acima.
 
 ## Tecnologias
 

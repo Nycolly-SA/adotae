@@ -8,11 +8,11 @@
         {% if edicao %}
         <p>Atualize os dados do seu rascunho. As fotografias existentes serão preservadas.</p>
         {% else %}
-        <p>Cadastre um animal doméstico de São João da Barra, RJ. Ele será salvo como rascunho e não aparecerá no catálogo público.</p>
+        <p>Cadastre um animal doméstico de São João da Barra, RJ. Escolha salvar como rascunho ou publicar agora.</p>
         {% endif %}
         {% if mensagem %}<p class="registration-message" role="alert">{{ mensagem }}</p>{% endif %}
         {% if not indisponivel %}
-        <p>Os campos são obrigatórios, exceto os indicados como opcionais. Não é necessário informar contatos{% if not edicao %} ou adicionar fotos nesta etapa{% endif %}.</p>
+        <p>Os campos são obrigatórios, exceto os indicados como opcionais.{% if edicao %} Não é necessário informar contatos.{% else %} Para salvar como rascunho, contatos e fotografia são opcionais. Para publicar agora, informe pelo menos um contato válido (e-mail ou WhatsApp) e uma fotografia válida.{% endif %}</p>
         <p>Os contatos que você escolher informar serão públicos quando o anúncio for publicado. Não informe seu endereço completo.</p>
         <form method="post" action="{{ url_for('editar_anuncio', animal_id=animal_id) if edicao else url_for('anunciar') }}"{% if not edicao %} enctype="multipart/form-data"{% endif %}>
             {{ form.csrf_token }}
@@ -37,7 +37,12 @@
                 {% if form.foto.errors %}<p id="foto-erro" class="field-error" role="alert">{{ form.foto.errors | join(' ') }}</p>{% endif %}
             </div>
             {% endif %}
-            <button class="button" type="submit">{{ 'Salvar alterações' if edicao else 'Salvar como rascunho' }}</button>
+            {% if edicao %}
+            <button class="button" type="submit">Salvar alterações</button>
+            {% else %}
+            <button class="button" type="submit" name="acao" value="rascunho">Salvar como rascunho</button>
+            <button class="button" type="submit" name="acao" value="publicar">Publicar agora</button>
+            {% endif %}
         </form>
         {% endif %}
         <p><a class="text-link" href="{{ url_for('minha_conta') }}">Voltar à minha conta</a></p>

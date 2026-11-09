@@ -40,12 +40,27 @@ class AnunciarTests(unittest.TestCase):
                                   animal_id="00000000-0000-0000-0000-000000000010",
                                   posicao=1, estado="pendente")]
         self.photo_state = "pronta"
+        self.publicar = True
+        self.rpc_failure = None
+        self.rpc_result = None
+        self.final_result = "normal"
         self.result = [dict(id="00000000-0000-0000-0000-000000000010",
                             usuario_id=self.identity["id"], status_publicacao="rascunho")]
 
         def transport(request):
             self.calls.append(request)
             path = request.url.path
+            if path == "/rest/v1/rpc/publicar_anuncio":
+                if self.publicar:
+                    self.result[0]["status_publicacao"] = "publicado"
+                if self.rpc_failure == "network":
+                    raise httpx.ReadError("private " + self.access)
+                if self.rpc_failure == "invalid-json":
+                    return httpx.Response(200, text="private")
+                if self.rpc_failure:
+                    return httpx.Response(500, json=dict(code=self.rpc_failure, message="private " + self.access,
+                                                        details=None, hint=None))
+                return httpx.Response(200, json=self.rpc_result)
             if path in ("/rest/v1/animal_fotos", "/rest/v1/rpc/confirmar_foto") or path.startswith("/storage/v1/"):
                 stage = ("reserva" if path.endswith("animal_fotos") and request.method == "POST"
                          else "leitura" if request.method == "GET"
@@ -64,9 +79,17 @@ class AnunciarTests(unittest.TestCase):
                 return httpx.Response(200, json=[dict(self.photo_result[0], estado=self.photo_state)])
             if request.url.path == "/rest/v1/animais":
                 if request.method == "GET":
-                    return httpx.Response(200, json=[])
+                    result = []
+                    if "order" not in request.url.params:
+                        result = self.result if self.final_result == "normal" else self.final_result
+                        if result == "network":
+                            raise httpx.ReadError("private " + self.access)
+                    return httpx.Response(200, content=json.dumps(result),
+                                          headers={"Content-Type": "application/json"})
                 if self.api_failure == "network":
                     raise httpx.ConnectError("private network details " + self.access)
+                if self.api_failure == "invalid-json":
+                    return httpx.Response(201, text="private " + self.access)
                 if self.api_failure:
                     return httpx.Response(self.api_failure, json=dict(
                         code="42501", message="private provider details " + self.access,
@@ -126,6 +149,245 @@ class AnunciarTests(unittest.TestCase):
         Image.new("RGB", (24, 16), "red").save(arquivo, format=formato)
         arquivo.seek(0)
         return arquivo, "foto." + formato.lower()
+
+    def publicar_data(self, **changes):
+        return self.data(**dict(dict(acao="publicar", email_contato="ana@example.com",
+                                    foto=self.photo()), **changes))
+
+    def publicacoes(self):
+        return [r for r in self.calls if r.url.path == "/rest/v1/rpc/publicar_anuncio"]
+
+    def conferir_publicacao(self, response):
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(response.location, "/minha-conta")
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
+        page = self.client.get(response.location)
+        for secret in (self.access, self.refresh, "private", "sb_publishable_test"):
+            self.assertNotIn(secret, page.text)
+        self.assertFalse(any(r.method in ("PATCH", "DELETE") for r in self.calls))
+        return page.text
+
+    def test_creation_buttons_and_instructions(self):
+        page = self.client.get("/anunciar").text
+        self.assertIn('name="acao" value="rascunho">Salvar como rascunho</button>', page)
+        self.assertIn('name="acao" value="publicar">Publicar agora</button>', page)
+        self.assertIn("pelo menos um contato válido", page)
+        self.assertIn("uma fotografia válida", page)
+
+    def test_explicit_draft_without_contacts_or_photo(self):
+        response = self.client.post("/anunciar", data=self.data(acao="rascunho"))
+        self.assertIn(SUCESSO, self.conferir_publicacao(response))
+        self.assertEqual(len(self.inserts()), 1)
+        self.assertEqual(self.photo_requests(), [])
+
+    def test_unknown_or_ambiguous_action_never_writes(self):
+        for action in ("", "excluir", "PUBLICAR", ["publicar", "rascunho"]):
+            with self.subTest(action=action):
+                response = self.client.post("/anunciar", data=self.publicar_data(acao=action))
+                self.assertEqual(response.status_code, 400)
+                self.assertIn('role="alert"', response.text)
+        self.assertEqual(self.inserts(), [])
+        self.assertEqual(self.photo_requests(), [])
+
+    def test_publish_validation_never_inserts(self):
+        changes = [dict(email_contato="", whatsapp=""), dict(email_contato="inválido"),
+                   dict(whatsapp="+5522999999999"), dict(nome=""), dict(foto=None),
+                   dict(foto=(BytesIO(b""), "foto.png")),
+                   dict(foto=(BytesIO(b"invalid"), "foto.png")),
+                   dict(foto=[self.photo(), self.photo()])]
+        for change in changes:
+            with self.subTest(change=change):
+                response = self.client.post("/anunciar", data=self.publicar_data(**change))
+                self.assertEqual(response.status_code, 400)
+                self.assertEqual(response.headers["Cache-Control"], "no-store")
+                self.assertIn('role="alert"', response.text)
+        self.assertEqual(self.inserts(), [])
+        self.assertEqual(self.photo_requests(), [])
+
+    def test_direct_publication_order_payload_and_owner_confirmation(self):
+        response = self.client.post("/anunciar", data=self.publicar_data(
+            usuario_id="forged", status_publicacao="publicado", p_animal_id="forged"))
+        operations = [r for r in self.calls if not r.url.path.startswith("/auth/")]
+        self.assertEqual([(r.method, r.url.path) for r in operations], [
+            ("POST", "/rest/v1/animais"), ("POST", "/rest/v1/animal_fotos"),
+            ("POST", "/storage/v1/object/animal-fotos/" + self.identity["id"] +
+             "/00000000-0000-0000-0000-000000000010/00000000-0000-0000-0000-000000000020.webp"),
+            ("POST", "/rest/v1/rpc/confirmar_foto"), ("GET", "/rest/v1/animal_fotos"),
+            ("POST", "/rest/v1/rpc/publicar_anuncio"), ("GET", "/rest/v1/animais")])
+        self.assertNotIn("status_publicacao", json.loads(self.inserts()[0].content))
+        self.assertNotIn("usuario_id", json.loads(self.inserts()[0].content))
+        self.assertEqual(json.loads(self.publicacoes()[0].content),
+                         {"p_animal_id": "00000000-0000-0000-0000-000000000010"})
+        query = operations[-1]
+        self.assertEqual(query.url.params["usuario_id"], "eq." + self.identity["id"])
+        self.assertEqual(query.url.params["id"], "eq.00000000-0000-0000-0000-000000000010")
+        for req in operations:
+            self.assertEqual(req.headers["authorization"], "Bearer " + self.access)
+        self.assertIn("Anúncio publicado com sucesso!", self.conferir_publicacao(response))
+        self.assertNotIn("Anúncio publicado com sucesso!", self.client.get("/minha-conta").text)
+
+    def test_direct_publication_accepts_whatsapp_without_email(self):
+        response = self.client.post("/anunciar", data=self.publicar_data(
+            email_contato="", whatsapp="5522999999999"))
+        self.assertIn("Anúncio publicado com sucesso!", self.conferir_publicacao(response))
+
+    def test_direct_insert_failure_or_uncertainty_stops_flow(self):
+        for failure in (400, 403, 500, "network", "invalid-json"):
+            with self.subTest(failure=failure):
+                self.calls.clear()
+                self.api_failure = failure
+                response = self.client.post("/anunciar", data=self.publicar_data())
+                self.assertEqual(response.status_code, 503)
+                self.assertIn("Meus anúncios", response.text)
+                self.assertNotIn("rascunho foi criado", response.text)
+                self.assertNotIn("Tente novamente", response.text)
+                self.assertEqual(len(self.inserts()), 1)
+                self.assertEqual(self.photo_requests(), [])
+
+    def test_direct_invalid_insert_never_uploads_or_publishes(self):
+        original = self.result[0].copy()
+        for result in ([], None, {}, [None], [{}], [dict(original, id="invalid")],
+                       [dict(original, usuario_id="other")],
+                       [dict(original, status_publicacao="publicado")], [original, original]):
+            with self.subTest(result=result):
+                self.calls.clear()
+                self.result = result
+                response = self.client.post("/anunciar", data=self.publicar_data())
+                self.assertEqual(response.status_code, 503)
+                self.assertIn("Meus anúncios", response.text)
+                self.assertEqual(len(self.inserts()), 1)
+                self.assertEqual(self.photo_requests(), [])
+
+    def test_direct_photo_failure_preserves_draft_and_never_publishes(self):
+        for stage, count in (("reserva", 1), ("upload", 2), ("confirmacao", 3), ("leitura", 4)):
+            for suffix in ("", "-network"):
+                with self.subTest(stage=stage, suffix=suffix):
+                    self.calls.clear()
+                    self.photo_failure = stage + suffix
+                    response = self.client.post("/anunciar", data=self.publicar_data())
+                    self.assertEqual(len(self.inserts()), 1)
+                    self.assertEqual(len(self.photo_requests()), count)
+                    self.assertEqual(self.publicacoes(), [])
+                    page = self.conferir_publicacao(response)
+                    self.assertIn("rascunho foi criado", page)
+                    self.assertIn("Meus anúncios", page)
+                    self.assertNotIn("Anúncio publicado com sucesso!", page)
+                    self.assertEqual(self.result[0]["status_publicacao"], "rascunho")
+
+    def test_direct_unready_photo_blocks_publication(self):
+        for state in ("pendente", "removendo", "unexpected"):
+            self.photo_state = state
+            response = self.client.post("/anunciar", data=self.publicar_data())
+            self.assertIn("rascunho foi criado", self.conferir_publicacao(response))
+            self.assertEqual(self.publicacoes(), [])
+
+    def test_direct_invalid_reservation_blocks_upload_and_publication(self):
+        original = self.photo_result[0].copy()
+        for result in ([], [{}], [dict(original, animal_id="other")],
+                       [dict(original, id="invalid")], [original, original]):
+            with self.subTest(result=result):
+                self.calls.clear()
+                self.photo_result = result
+                response = self.client.post("/anunciar", data=self.publicar_data())
+                self.assertIn("rascunho foi criado", self.conferir_publicacao(response))
+                self.assertEqual(len(self.inserts()), 1)
+                self.assertEqual(len(self.photo_requests()), 1)
+                self.assertEqual(self.publicacoes(), [])
+
+    def test_direct_lost_rpc_response_is_confirmed_without_retry(self):
+        for failure in ("network", "invalid-json", "XX000"):
+            with self.subTest(failure=failure):
+                self.calls.clear()
+                self.result[0]["status_publicacao"] = "rascunho"
+                self.rpc_failure = failure
+                response = self.client.post("/anunciar", data=self.publicar_data())
+                self.assertIn("Anúncio publicado com sucesso!", self.conferir_publicacao(response))
+                self.assertEqual(len(self.publicacoes()), 1)
+                self.assertEqual(len(self.inserts()), 1)
+
+    def test_direct_refused_or_unconfirmed_publication_preserves_photo(self):
+        self.publicar = False
+        for failure in (None, "42501", "55P03", "network", "invalid-json"):
+            with self.subTest(failure=failure):
+                self.calls.clear()
+                self.rpc_failure = failure
+                self.rpc_result = {"status_publicacao": "publicado"}
+                response = self.client.post("/anunciar", data=self.publicar_data())
+                page = self.conferir_publicacao(response)
+                self.assertNotIn("Anúncio publicado com sucesso!", page)
+                self.assertIn("Meus anúncios", page)
+                self.assertEqual(len(self.publicacoes()), 1)
+                self.assertEqual(len(self.inserts()), 1)
+                self.assertEqual(len(self.photo_requests()), 5)
+                if failure == "55P03":
+                    self.assertIn("Aguarde", page)
+
+    def test_direct_final_read_failure_is_uncertain(self):
+        original = self.result[0].copy()
+        for result in ("network", None, {}, [], [None], [original, original],
+                       [dict(original, usuario_id="other")], [dict(original, id="other")],
+                       [dict(original, status_publicacao="unexpected")]):
+            for failure in (None, "network"):
+                with self.subTest(result=result, failure=failure):
+                    self.calls.clear()
+                    self.result[0]["status_publicacao"] = "rascunho"
+                    self.final_result = result
+                    self.rpc_failure = failure
+                    response = self.client.post("/anunciar", data=self.publicar_data())
+                    page = self.conferir_publicacao(response)
+                    self.assertIn("resultado da publicação é incerto", page)
+                    self.assertNotIn("Anúncio publicado com sucesso!", page)
+                    self.assertEqual(len(self.publicacoes()), 1)
+                    self.assertEqual(len(self.inserts()), 1)
+
+    def test_direct_security_guards_prevent_writes(self):
+        for change in ({"csrf_token": "invalid"}, {"csrf_token": ""}):
+            response = self.client.post("/anunciar", data=self.publicar_data(**change))
+            self.assertEqual(response.status_code, 400)
+            self.assertEqual(response.headers["Cache-Control"], "no-store")
+        data = self.publicar_data()
+        self.identity["email_confirmed_at"] = None
+        self.assertEqual(self.client.post("/anunciar", data=data).location, "/login")
+        self.assertEqual(self.inserts(), [])
+        self.assertEqual(self.photo_requests(), [])
+
+    def test_direct_body_limit_prevents_writes(self):
+        response = self.client.post("/anunciar", data=self.publicar_data(
+            foto=(BytesIO(b"x" * (4 * 1024 * 1024)), "foto.png")))
+        response.request.environ["wsgi.input"].close()
+        self.assertEqual(response.status_code, 413)
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
+        self.assertEqual(self.inserts(), [])
+
+    def test_direct_anonymous_unavailable_auth_and_configuration(self):
+        visitor = app.test_client()
+        token = re.search(r'name="csrf_token"[^>]*value="([^"]+)"',
+                          visitor.get("/login").text).group(1)
+        response = visitor.post("/anunciar", data=self.publicar_data(csrf_token=token))
+        self.assertEqual(response.location, "/login")
+        data = self.publicar_data()
+        self.auth_failure = 503
+        response = self.client.post("/anunciar", data=data)
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.headers["Cache-Control"], "no-store")
+        self.auth_failure = None
+        for config in ({"SECRET_KEY": None}, {"SUPABASE_URL": ""}, {"SUPABASE_PUBLISHABLE_KEY": ""}):
+            data = self.publicar_data()
+            with patch.dict(app.config, config):
+                response = self.client.post("/anunciar", data=data)
+                self.assertEqual(response.status_code, 503)
+                self.assertEqual(response.headers["Cache-Control"], "no-store")
+        self.assertEqual(self.inserts(), [])
+        self.assertEqual(self.photo_requests(), [])
+
+    def test_direct_refreshed_jwt_used_through_confirmation(self):
+        data = self.publicar_data()
+        self.cookies(access=jwt(expired=True))
+        response = self.client.post("/anunciar", data=data)
+        self.assertIn("Anúncio publicado com sucesso!", self.conferir_publicacao(response))
+        for req in self.calls:
+            if req.url.path.startswith(("/rest/", "/storage/")):
+                self.assertEqual(req.headers["authorization"], "Bearer " + self.access)
 
     def test_photo_form_and_no_photo(self):
         page = self.client.get("/anunciar").text
