@@ -70,7 +70,8 @@ class RouteTests(unittest.TestCase):
                 especie=especie, sexo=sexo, idade_aproximada=idade, porte=porte,
                 distrito=distrito, descricao="Descrição pública.", criado_em=f"2026-11-0{5-index}T00:00:00Z",
                 status_publicacao="publicado", status_adocao="disponivel", oculto_admin=False,
-                usuario_id=user()["id"], email_contato="private-contact@example.test", whatsapp="5522999999999"))
+                usuario_id=user()["id"], email_contato="private-contact@example.org", whatsapp="5522999999999",
+                especie_outro=None, bairro=None))
 
         def transport(request):
             self.calls.append(request)
@@ -119,12 +120,12 @@ class RouteTests(unittest.TestCase):
         self.assertIn("/animais", page.links)
         self.assertEqual(page.heading_count, 1)
 
-    def test_catalog_presents_public_animals_without_demo_images_or_details(self):
+    def test_catalog_presents_public_animals_without_demo_images(self):
         html, page = self.assert_catalog({}, ("Bento", "Luna", "Paçoca", "Amora"))
         self.assertEqual(page.heading_count, 1)
         self.assertEqual(page.images, [])
         self.assertEqual(html.count("Fotografia temporariamente indisponível"), 4)
-        self.assertIn("Detalhes e contato ainda indisponíveis", html)
+        self.assertIn("Ver detalhes", html)
         self.assertNotIn("os animais e os dados são fictícios", html)
         self.assertIn("dados de validação podem ser fictícios", html)
         self.assertIn("2 anos", html)
@@ -166,8 +167,12 @@ class RouteTests(unittest.TestCase):
                 html = self.client.get("/animais", query_string=query).text
                 page = PageParser()
                 page.feed(html)
-                self.assertFalse(any(link.startswith("/animais/") for link in page.links))
-                self.assertNotIn("Ver detalhes", html)
+                details = [link for link in page.links if link.startswith("/animais/")]
+                expected = [f'/animais/{row["id"]}' for row in self.rows
+                            if (not query.get("tipo") or row["especie"] == query["tipo"])
+                            and (not query.get("distrito") or row["distrito"] == query["distrito"])
+                            and (not query.get("porte") or row["porte"] == query["porte"])]
+                self.assertEqual(details, expected)
 
     def test_details_present_each_animals_data_and_existing_image(self):
         cases = (

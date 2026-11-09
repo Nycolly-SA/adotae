@@ -1,11 +1,14 @@
 """Aplicação demonstrativa do projeto acadêmico Adotaê."""
 
 import os
+import re
 from pathlib import Path
 from typing import cast
+from urllib.parse import quote
 from uuid import UUID
 
 from dotenv import load_dotenv
+from email_validator import validate_email
 from flask import Flask, abort, flash, g, redirect, render_template, request, url_for
 from flask_wtf.csrf import CSRFError, CSRFProtect
 from httpx import HTTPError
@@ -567,6 +570,53 @@ def validar_catalogo(registros):
             raise ValueError("Opções de catálogo inválidas")
         animais.append({campo: registro[campo] for campo in limites})
     return animais
+
+
+@app.get("/animais/<uuid:animal_id>")
+def animal_detalhes_publico(animal_id):
+    try:
+        # Mesmo após login, nunca usar as permissões do proprietário nesta página.
+        registros = (novo_cliente().table("animais")
+                     .select("id,nome,especie,sexo,idade_aproximada,porte,descricao,distrito,"
+                             "especie_outro,bairro,email_contato,whatsapp,"
+                             "status_publicacao,status_adocao,oculto_admin")
+                     .eq("id", str(animal_id)).eq("status_publicacao", "publicado")
+                     .eq("status_adocao", "disponivel").eq("oculto_admin", False)
+                     .execute().data)
+        if registros == []:
+            abort(404)
+        if not isinstance(registros, list) or len(registros) != 1:
+            raise ValueError("Resposta de detalhes inválida")
+        animal = validar_catalogo(registros)[0]
+        registro = registros[0]
+        if UUID(animal["id"]) != animal_id:
+            raise ValueError("Identificação de anúncio inválida")
+        if (registro.get("status_publicacao") not in ("publicado", "rascunho")
+                or registro.get("status_adocao") not in ("disponivel", "adotado")
+                or type(registro.get("oculto_admin")) is not bool):
+            raise ValueError("Estado de anúncio inválido")
+        if (registro["status_publicacao"] != "publicado"
+                or registro["status_adocao"] != "disponivel" or registro["oculto_admin"]):
+            abort(404)
+        for campo, limite in (("especie_outro", 60), ("bairro", 100),
+                              ("email_contato", 254), ("whatsapp", 15)):
+            if campo not in registro:
+                raise ValueError("Campo de detalhes ausente")
+            valor = registro[campo]
+            if valor is not None and (not isinstance(valor, str) or not valor.strip()
+                                      or valor != valor.strip() or len(valor) > limite):
+                raise ValueError("Campo de detalhes inválido")
+            animal[campo] = valor
+        if (animal["especie"] == "Outro animal doméstico") != bool(animal["especie_outro"]):
+            raise ValueError("Detalhe de espécie inválido")
+        if animal["whatsapp"] and not re.fullmatch(r"[1-9][0-9]{7,14}", animal["whatsapp"]):
+            raise ValueError("WhatsApp inválido")
+        if animal["email_contato"]:
+            validate_email(animal["email_contato"], check_deliverability=False)
+            animal["email_link"] = "mailto:" + quote(animal["email_contato"], safe="@")
+    except (APIError, HTTPError, SupabaseException, ValueError, TypeError):
+        return render_template("animal_detalhes.html", publico=True, indisponivel=True), 503
+    return render_template("animal_detalhes.html", animal=animal, publico=True)
 
 
 @app.get("/animais/<int:id>")

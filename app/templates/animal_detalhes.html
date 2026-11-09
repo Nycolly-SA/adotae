@@ -1,31 +1,50 @@
 {% extends "base.html" %}
-{% block title %}{{ animal.nome }} — Adotaê{% endblock %}
+{% block title %}{{ 'Detalhes indisponíveis' if indisponivel else animal.nome }} — Adotaê{% endblock %}
 {% block content %}
-<article class="animal-detail container" aria-labelledby="nome-animal">
+<article class="animal-detail container" aria-labelledby="{{ 'titulo-indisponivel' if indisponivel else 'nome-animal' }}">
     <a class="text-link detail-back" href="{{ url_for('animais') }}">Voltar ao catálogo</a>
-    <div class="catalog-notice"><span class="note-symbol" aria-hidden="true">i</span><p>Página demonstrativa: o animal e os dados são fictícios. Ainda não é possível solicitar uma adoção por aqui.</p></div>
+    {% if indisponivel %}
+    <div class="catalog-empty" role="alert">
+        <h1 id="titulo-indisponivel">Detalhes indisponíveis</h1>
+        <p>Não foi possível consultar o anúncio agora. Tente novamente mais tarde.</p>
+    </div>
+    {% else %}
+    {% if not publico %}<div class="catalog-notice"><span class="note-symbol" aria-hidden="true">i</span><p>Página demonstrativa: o animal e os dados são fictícios. Ainda não é possível solicitar uma adoção por aqui.</p></div>{% endif %}
     <div class="detail-layout">
+        {% if publico %}
+        <div class="detail-image card-image-unavailable"><p>Fotografia temporariamente indisponível</p></div>
+        {% else %}
         <img class="detail-image" src="{{ url_for('static', filename='images/' ~ animal.imagem) }}" alt="{{ animal.imagem_alt }}" width="480" height="400">
+        {% endif %}
         <div class="detail-content">
             <p class="section-label">Conheça nosso amigo</p>
             <h1 id="nome-animal">{{ animal.nome }}</h1>
             <dl class="detail-facts">
-                <div><dt>Espécie</dt><dd>{{ animal.especie }}</dd></div>
+                <div><dt>Espécie</dt><dd>{{ animal.especie }}{% if publico and animal.especie_outro %} — {{ animal.especie_outro }}{% endif %}</dd></div>
                 <div><dt>Sexo</dt><dd>{{ animal.sexo }}</dd></div>
-                <div><dt>Idade</dt><dd>{{ animal.idade }}</dd></div>
+                <div><dt>Idade</dt><dd>{{ animal.idade_aproximada if publico else animal.idade }}</dd></div>
                 <div><dt>Porte</dt><dd>{{ animal.porte }}</dd></div>
                 <div class="detail-district"><dt>Distrito</dt><dd>{{ animal.distrito }}</dd></div>
+                {% if publico and animal.bairro %}<div class="detail-district"><dt>Bairro</dt><dd>{{ animal.bairro }}</dd></div>{% endif %}
             </dl>
             <section aria-labelledby="sobre-animal">
                 <h2 id="sobre-animal">Sobre {{ animal.nome }}</h2>
-                <p>{{ animal.descricao }}</p>
+                <p{% if publico %} class="detail-description"{% endif %}>{{ animal.descricao }}</p>
             </section>
             <section class="detail-contact" aria-labelledby="titulo-contato">
+                {% if publico %}
+                <h2 id="titulo-contato">Contato</h2>
+                {% if animal.email_contato %}<p>E-mail: <a href="{{ animal.email_link }}">{{ animal.email_contato }}</a></p>{% endif %}
+                {% if animal.whatsapp %}<p>WhatsApp: <a href="https://wa.me/{{ animal.whatsapp }}">{{ animal.whatsapp }}</a></p>{% endif %}
+                {% if not animal.email_contato and not animal.whatsapp %}<p>Nenhum contato informado.</p>{% endif %}
+                {% else %}
                 <h2 id="titulo-contato">Contato demonstrativo</h2>
                 <p>Não há contatos disponíveis nesta demonstração.</p>
                 <p>Em uma etapa futura, esta seção exibirá os contatos que a pessoa responsável pelo anúncio escolher divulgar.</p>
+                {% endif %}
             </section>
         </div>
     </div>
+    {% endif %}
 </article>
 {% endblock %}
