@@ -1,49 +1,96 @@
 {% extends "base.html" %}
 {% block title %}Minha conta — Adotaê{% endblock %}
 {% block content %}
-<section class="container registration" aria-labelledby="conta-titulo">
-    <div class="registration-card">
-        <p class="section-label">Minha conta</p>
-        <h1 id="conta-titulo">Olá, {{ g.usuario.user_metadata.get('nome') or 'bem-vindo' }}!</h1>
-        <p>Você está conectado ao Adotaê.</p>
+<section class="container account-page" aria-labelledby="conta-titulo">
+    <div class="account-heading">
+        <div>
+            <p class="section-label">Minha conta</p>
+            <h1 id="conta-titulo">Olá, {{ g.usuario.user_metadata.get('nome') or 'bem-vindo' }}!</h1>
+            <p>Acompanhe os animais que você anunciou.</p>
+        </div>
+        <a class="button" href="{{ url_for('anunciar') }}">Anunciar animal <span aria-hidden="true">+</span></a>
+    </div>
         {% for categoria, mensagem in get_flashed_messages(with_categories=true, category_filter=['rascunho-sucesso', 'rascunho-aviso']) %}
         <p class="registration-message" role="{{ 'alert' if categoria == 'rascunho-aviso' else 'status' }}">{{ mensagem }}</p>
         {% endfor %}
-        <p><a class="text-link" href="{{ url_for('anunciar') }}">Anunciar animal</a></p>
         <section class="account-list" aria-labelledby="anuncios-titulo">
-            <h2 id="anuncios-titulo">Meus anúncios</h2>
-            <p>Para publicar, o anúncio precisa de pelo menos um contato e uma fotografia pronta.</p>
+            <div class="account-list-heading">
+                <h2 id="anuncios-titulo">Meus anúncios</h2>
+                {% if anuncios is not none %}<span class="account-count">{{ anuncios|length }} {{ 'anúncio' if anuncios|length == 1 else 'anúncios' }}</span>{% endif %}
+            </div>
             {% if anuncios is none %}
             <p class="registration-message" role="alert">Não foi possível carregar seus anúncios agora. Tente novamente mais tarde.</p>
             {% elif anuncios %}
             <ul class="account-animals">
                 {% for animal in anuncios %}
                 <li>
-                    <h3>{{ animal.nome }}</h3>
-                    <dl class="animal-facts">
-                        <div><dt>Espécie</dt><dd>{{ animal.especie }}</dd></div>
-                        <div><dt>Distrito</dt><dd>{{ animal.distrito }}</dd></div>
-                        <div><dt>Status de publicação</dt><dd>{{ 'Rascunho' if animal.status_publicacao == 'rascunho' else 'Publicado' }}</dd></div>
-                    </dl>
-                    {% if animal.status_publicacao == 'rascunho' %}
-                    <a class="text-link" href="{{ url_for('editar_anuncio', animal_id=animal.id) }}">Editar</a>
-                    <a class="text-link" href="{{ url_for('adicionar_foto', animal_id=animal.id) }}">Fotografia</a>
-                    <form method="post" action="{{ url_for('publicar_anuncio', animal_id=animal.id) }}">
-                        {{ form.csrf_token(id=false) }}
-                        <button class="button" type="submit" aria-label="Publicar anúncio de {{ animal.nome }}">Publicar</button>
-                    </form>
+                    <div class="account-thumbnail">
+                        <span class="account-thumbnail-placeholder"{% if animal.tem_foto %} aria-hidden="true"{% endif %}>Sem fotografia</span>
+                        {% if animal.tem_foto %}
+                        <img src="{{ url_for('miniatura_propria', animal_id=animal.id) }}"
+                             alt="Fotografia de {{ animal.nome }}" width="128" height="128"
+                             loading="lazy" decoding="async" referrerpolicy="no-referrer">
+                        {% endif %}
+                    </div>
+                    <div class="account-animal-content">
+                        <div class="account-animal-header">
+                            <h3>{{ animal.nome }}</h3>
+                            {% set status = 'Adotado' if animal.status_adocao == 'adotado' else ('Rascunho' if animal.status_publicacao == 'rascunho' else 'Publicado') %}
+                            <span class="account-animal-status account-animal-status--{{ status|lower }}" aria-label="Status do anúncio: {{ status }}">{{ status }}</span>
+                        </div>
+                        <dl class="animal-facts">
+                            <div><dt>Espécie</dt><dd>{{ animal.especie }}</dd></div>
+                            <div><dt>Distrito</dt><dd>{{ animal.distrito }}</dd></div>
+                        </dl>
+                    </div>
+                    <div class="account-animal-footer">
+                    {% if animal.oculto_admin %}
+                    <p class="account-moderation"><strong>Oculto pela moderação</strong>Este anúncio não aparece no catálogo.</p>
                     {% endif %}
+                    {% if animal.status_adocao == 'adotado' %}
+                    <p class="account-animal-note">Este animal já saiu do catálogo. O anúncio continua salvo na sua conta.</p>
+                    {% endif %}
+                    {% if animal.status_adocao != 'adotado' and animal.status_publicacao == 'rascunho' %}
+                    <p class="account-animal-note">Para publicar, o anúncio precisa de pelo menos um contato e uma fotografia pronta.</p>
+                    <div class="account-animal-actions">
+                        <a class="text-link" href="{{ url_for('editar_anuncio', animal_id=animal.id) }}">Editar dados</a>
+                        <a class="text-link" href="{{ url_for('adicionar_foto', animal_id=animal.id) }}">{{ 'Situação da foto' if animal.tem_foto else 'Adicionar foto' }}</a>
+                        <form method="post" action="{{ url_for('publicar_anuncio', animal_id=animal.id) }}">
+                            {{ form.csrf_token(id=false) }}
+                            <button class="button" type="submit" aria-label="Publicar anúncio de {{ animal.nome }}">Publicar</button>
+                        </form>
+                    </div>
+                    {% elif animal.status_publicacao == 'publicado' and animal.status_adocao == 'disponivel' %}
+                    <div class="account-animal-actions">
+                        {% if not animal.oculto_admin %}
+                        <a class="button account-button-secondary" href="{{ url_for('animal_detalhes_publico', animal_id=animal.id) }}">Ver anúncio</a>
+                        {% endif %}
+                        <details class="account-adoption">
+                            <summary>Marcar como adotado</summary>
+                            <form class="account-adoption-form" method="post" action="{{ url_for('adotar_anuncio', animal_id=animal.id) }}">
+                                {{ form.csrf_token(id=false) }}
+                                <p id="aviso-adocao-{{ animal.id }}">Após confirmar a adoção, o animal deixará de aparecer no catálogo. O anúncio continuará salvo na sua conta e não poderá ser reativado por aqui.</p>
+                                <label class="account-adoption-check"><input type="checkbox" name="confirmar_adocao" value="sim" required aria-describedby="aviso-adocao-{{ animal.id }}"> <span>Confirmo que {{ animal.nome }} foi adotado.</span></label>
+                                <button class="button" type="submit" aria-label="Confirmar adoção de {{ animal.nome }}">Confirmar adoção</button>
+                            </form>
+                        </details>
+                    </div>
+                    {% endif %}
+                    </div>
                 </li>
                 {% endfor %}
             </ul>
             {% else %}
-            <p>Você ainda não cadastrou nenhum animal.</p>
+            <div class="account-empty">
+                <h3>Seu primeiro anúncio começa aqui.</h3>
+                <p>Você ainda não cadastrou nenhum animal.</p>
+                <p>Use o botão Anunciar animal para cadastrar um animal e informar os contatos que deseja divulgar.</p>
+            </div>
             {% endif %}
         </section>
-        <form method="post" action="{{ url_for('logout') }}">
+        <form class="account-logout" method="post" action="{{ url_for('logout') }}">
             {{ form.csrf_token }}
-            <button class="button" type="submit">Sair</button>
+            <button class="text-link" type="submit">Sair da conta</button>
         </form>
-    </div>
 </section>
 {% endblock %}

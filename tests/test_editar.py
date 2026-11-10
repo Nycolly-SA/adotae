@@ -32,6 +32,7 @@ class EditarTests(unittest.TestCase):
         self.client.set_cookie("adotae_refresh", "private-refresh")
         self.calls = []
         self.row = dict(id=ANIMAL_ID, usuario_id=self.identity["id"], status_publicacao="rascunho",
+                        status_adocao="disponivel", oculto_admin=False,
                         nome="Fubá", especie="Outro animal doméstico", especie_outro="Porco doméstico",
                         sexo="Fêmea", idade_aproximada="2 anos", porte="Médio", descricao="Amigável.",
                         distrito="Grussaí", bairro="Centro", email_contato="ana@example.com",

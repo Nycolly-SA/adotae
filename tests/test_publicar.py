@@ -29,7 +29,7 @@ class PublicarTests(unittest.TestCase):
         self.client.set_cookie("adotae_access", self.access)
         self.client.set_cookie("adotae_refresh", "private-refresh")
         self.row = dict(id=ANIMAL_ID, usuario_id=self.identity["id"], nome="Fubá",
-                        especie="Gato", distrito="Grussaí", status_publicacao="rascunho")
+                        especie="Gato", distrito="Grussaí", status_publicacao="rascunho", status_adocao="disponivel", oculto_admin=False)
         self.calls = []
         self.reads = []
         self.rpc_failure = None

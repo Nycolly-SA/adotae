@@ -34,6 +34,7 @@ class AdicionarFotoTests(unittest.TestCase):
         self.client.set_cookie("adotae_refresh", "private-refresh")
         self.calls = []
         self.animal = dict(id=ANIMAL_ID, usuario_id=self.identity["id"], status_publicacao="rascunho",
+                        status_adocao="disponivel", oculto_admin=False,
                            nome="Fubá", especie="Gato", distrito="Grussaí")
         self.animais = [self.animal]
         self.reservas = []

@@ -99,7 +99,7 @@ def registrar_auth(app):
             # Cookies de navegador: a validade efetiva é controlada pelo Supabase.
             response.set_cookie(ACCESS_COOKIE, g.auth_tokens.access_token, **opcoes)
             response.set_cookie(REFRESH_COOKIE, g.auth_tokens.refresh_token, **opcoes)
-        if (request.endpoint in ("login", "minha_conta", "logout", "cadastro", "confirmar_email", "anunciar", "editar_anuncio", "adicionar_foto", "publicar_anuncio", "animais", "animal_detalhes_publico")
+        if (request.endpoint in ("login", "minha_conta", "miniatura_propria", "logout", "cadastro", "confirmar_email", "anunciar", "editar_anuncio", "adicionar_foto", "publicar_anuncio", "adotar_anuncio", "animais", "animal_detalhes_publico")
                 or session.modified
                 or request.cookies.get(ACCESS_COOKIE) or request.cookies.get(REFRESH_COOKIE)
                 or getattr(g, "auth_tokens", None)):
@@ -181,7 +181,7 @@ def registrar_auth(app):
         anuncios = None
         try:
             registros = (g.auth_cliente.table("animais")
-                         .select("id,nome,especie,distrito,status_publicacao")
+                         .select("id,nome,especie,distrito,status_publicacao,status_adocao,oculto_admin,animal_fotos(id,estado)")
                          .eq("usuario_id", g.usuario.id)
                          .order("criado_em", desc=True).execute().data)
             # Só apresentar a lista quando todos os registros forem válidos.
@@ -191,11 +191,18 @@ def registrar_auth(app):
                 or any(not isinstance(animal.get(campo), str) or not animal[campo].strip()
                        for campo in ("nome", "especie", "distrito"))
                 or animal.get("status_publicacao") not in ("rascunho", "publicado")
+                or animal.get("status_adocao") not in ("disponivel", "adotado")
+                or not isinstance(animal.get("oculto_admin"), bool)
                 for animal in registros
             ):
                 raise ValueError("Resposta de listagem inválida")
             for animal in registros:
                 animal["id"] = str(UUID(animal.get("id")))
+                # No máximo três reservas por anúncio; sem consulta por cartão.
+                fotos = animal.pop("animal_fotos", [])
+                animal["tem_foto"] = isinstance(fotos, list) and any(
+                    isinstance(foto, dict) and foto.get("estado") == "pronta"
+                    for foto in fotos)
             anuncios = registros
         except (APIError, HTTPError, SupabaseException, ValueError, TypeError):
             pass

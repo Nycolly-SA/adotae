@@ -88,3 +88,24 @@ def _codificar_webp(foto: Image.Image) -> FotoProcessada:
                                "Escolha outra imagem.")
         novo_lado = max(MIN_LADO_REDUCAO, int(maior_lado * 0.8))
         foto.thumbnail((novo_lado, novo_lado), Image.Resampling.LANCZOS)
+
+
+def criar_miniatura(conteudo: bytes) -> bytes:
+    """Reduz o WebP armazenado a 192 px, em memória e sem metadados."""
+    if len(conteudo) > MAX_WEBP_BYTES:
+        raise FotoInvalida("Fotografia indisponível.")
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            with Image.open(BytesIO(conteudo)) as foto:
+                if (foto.format != "WEBP" or max(foto.size) > MAX_LADO_FINAL
+                        or getattr(foto, "is_animated", False)):
+                    raise FotoInvalida("Fotografia indisponível.")
+                with ImageOps.fit(foto, (192, 192), method=Image.Resampling.LANCZOS) as pequena:
+                    pequena.info.clear()
+                    with BytesIO() as saida:
+                        pequena.save(saida, format="WEBP", quality=70)
+                        return saida.getvalue()
+    except (OSError, ValueError, SyntaxError, EOFError,
+            Image.DecompressionBombWarning, Image.DecompressionBombError) as erro:
+        raise FotoInvalida("Fotografia indisponível.") from erro

@@ -351,7 +351,7 @@ class LoginTests(unittest.TestCase):
         query = self.list_requests()[0]
         self.assertEqual(query.method, "GET")
         self.assertEqual(dict(query.url.params), dict(
-            select="id,nome,especie,distrito,status_publicacao",
+            select="id,nome,especie,distrito,status_publicacao,status_adocao,oculto_admin,animal_fotos(id,estado)",
             usuario_id="eq.00000000-0000-0000-0000-000000000001",
             order="criado_em.desc"))
         self.assertEqual(query.headers["accept-profile"], "public")
@@ -362,14 +362,14 @@ class LoginTests(unittest.TestCase):
     def test_account_lists_are_isolated_between_users(self):
         self.cookies()
         self.list_result = [dict(id="00000000-0000-0000-0000-000000000010", nome="Fubá", especie="Cachorro", distrito="Grussaí",
-                                 status_publicacao="rascunho")]
+                                 status_publicacao="rascunho", status_adocao="disponivel", oculto_admin=False)]
         first = self.client.get("/minha-conta")
         other = app.test_client()
         other_access = jwt("bia")
         self.cookies(access=other_access, client=other)
         self.identity_id = "00000000-0000-0000-0000-000000000002"
         self.list_result = [dict(id="00000000-0000-0000-0000-000000000010", nome="Luna", especie="Gato", distrito="Atafona",
-                                 status_publicacao="publicado")]
+                                 status_publicacao="publicado", status_adocao="disponivel", oculto_admin=False)]
         second = other.get("/minha-conta")
         self.assertIn("Fubá", first.text)
         self.assertNotIn("Luna", first.text)
@@ -396,8 +396,8 @@ class LoginTests(unittest.TestCase):
     def test_account_list_displays_fields_statuses_and_response_order(self):
         self.cookies()
         self.list_result = [
-            dict(id="00000000-0000-0000-0000-000000000010", nome="Fubá", especie="Cachorro", distrito="Grussaí", status_publicacao="rascunho"),
-            dict(id="00000000-0000-0000-0000-000000000010", nome="Luna", especie="Gato", distrito="Atafona", status_publicacao="publicado"),
+            dict(id="00000000-0000-0000-0000-000000000010", nome="Fubá", especie="Cachorro", distrito="Grussaí", status_publicacao="rascunho", status_adocao="disponivel", oculto_admin=False),
+            dict(id="00000000-0000-0000-0000-000000000010", nome="Luna", especie="Gato", distrito="Atafona", status_publicacao="publicado", status_adocao="disponivel", oculto_admin=False),
         ]
         page = self.client.get("/minha-conta")
         self.assertEqual(page.status_code, 200)
@@ -415,7 +415,39 @@ class LoginTests(unittest.TestCase):
         page = self.client.get("/minha-conta")
         self.assertEqual(page.status_code, 200)
         self.assertIn("Você ainda não cadastrou nenhum animal.", page.text)
+        self.assertIn("Seu primeiro anúncio começa aqui.", page.text)
         self.assertNotIn("Não foi possível carregar seus anúncios", page.text)
+
+    def test_account_hints_follow_draft_and_photo_state(self):
+        self.cookies()
+        animal = dict(id="00000000-0000-0000-0000-000000000010", nome="Bento",
+                      especie="Cachorro", distrito="Grussaí", status_publicacao="rascunho",
+                      status_adocao="disponivel", oculto_admin=False)
+        for photo in (False, True):
+            with self.subTest(photo=photo):
+                self.list_result = [dict(animal, animal_fotos=[dict(estado="pronta")] if photo else [])]
+                page = self.client.get("/minha-conta")
+                self.assertIn("Editar dados", page.text)
+                self.assertIn("Situação da foto" if photo else "Adicionar foto", page.text)
+                self.assertIn("Para publicar, o anúncio precisa de pelo menos um contato e uma fotografia pronta.", page.text)
+        self.list_result = [dict(animal, status_publicacao="publicado")]
+        page = self.client.get("/minha-conta")
+        self.assertNotIn("Para publicar, o anúncio precisa", page.text)
+
+    def test_account_explains_moderation_without_losing_adoption_status(self):
+        self.cookies()
+        for adoption in ("disponivel", "adotado"):
+            for hidden in (False, True):
+                with self.subTest(adoption=adoption, hidden=hidden):
+                    self.list_result = [dict(id="00000000-0000-0000-0000-000000000010", nome="Bento",
+                        especie="Cachorro", distrito="Grussaí", status_publicacao="publicado",
+                        status_adocao=adoption, oculto_admin=hidden)]
+                    page = self.client.get("/minha-conta")
+                    self.assertEqual("Oculto pela moderação" in page.text, hidden)
+                    self.assertEqual("Este animal já saiu do catálogo. O anúncio continua salvo na sua conta." in page.text,
+                                     adoption == "adotado")
+                    self.assertEqual('href="/animais/00000000-0000-0000-0000-000000000010"' in page.text,
+                                     adoption == "disponivel" and not hidden)
 
     def assert_list_unavailable(self, page):
         self.assertEqual(page.status_code, 503)
@@ -445,7 +477,7 @@ class LoginTests(unittest.TestCase):
     def test_account_list_rejects_unexpected_responses_without_partial_data(self):
         self.cookies()
         valid = dict(id="00000000-0000-0000-0000-000000000010", nome="Não exibir lista parcial", especie="Gato", distrito="Atafona",
-                     status_publicacao="rascunho")
+                     status_publicacao="rascunho", status_adocao="disponivel", oculto_admin=False)
         invalid_rows = [None, "animal", {}, dict(valid, id=None), dict(valid, id=[]),
                         dict(valid, id="invalid"), dict(valid, nome=None), dict(valid, nome=[]),
                         dict(valid, nome=" "), dict(valid, especie=42), dict(valid, distrito={}),
@@ -460,7 +492,7 @@ class LoginTests(unittest.TestCase):
     def test_account_list_escapes_text_and_does_not_expose_credentials(self):
         self.cookies()
         self.list_result = [dict(id="00000000-0000-0000-0000-000000000010", nome="<script>animal</script>", especie='<b>Gato</b>',
-                                 distrito='<img src=x onerror="alert(1)">', status_publicacao="rascunho")]
+                                 distrito='<img src=x onerror="alert(1)">', status_publicacao="rascunho", status_adocao="disponivel", oculto_admin=False)]
         page = self.client.get("/minha-conta")
         self.assertEqual(page.status_code, 200)
         for escaped in ("&lt;script&gt;animal&lt;/script&gt;", "&lt;b&gt;Gato&lt;/b&gt;",

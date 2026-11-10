@@ -1,4 +1,13 @@
 // Os links permanecem visíveis se JavaScript estiver desativado.
+document.querySelectorAll('.account-thumbnail img').forEach((image) => {
+    const showPlaceholder = () => {
+        image.hidden = true;
+        image.parentElement.querySelector('.account-thumbnail-placeholder').removeAttribute('aria-hidden');
+    };
+    image.addEventListener('error', showPlaceholder);
+    if (image.complete && image.naturalWidth === 0) showPlaceholder();
+});
+
 const menuButton = document.querySelector('.menu-toggle');
 const navigation = document.querySelector('#navegacao');
 const mobileViewport = window.matchMedia('(max-width: 640px)');

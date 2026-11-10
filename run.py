@@ -9,7 +9,7 @@ from uuid import UUID
 
 from dotenv import load_dotenv
 from email_validator import validate_email
-from flask import Flask, abort, flash, g, redirect, render_template, request, url_for
+from flask import Flask, Response, abort, flash, g, redirect, render_template, render_template_string, request, url_for
 from flask_wtf.csrf import CSRFError, CSRFProtect
 from httpx import HTTPError
 from postgrest.exceptions import APIError
@@ -19,7 +19,7 @@ from supabase_auth.types import SignUpWithEmailAndPasswordCredentials
 
 from app.forms import AnimalForm, CadastroForm, FotoForm, LoginForm
 from app.auth import INDISPONIVEL, novo_cliente, registrar_auth
-from app.fotos import FotoInvalida, processar_foto
+from app.fotos import FotoInvalida, criar_miniatura, processar_foto
 
 load_dotenv(Path(__file__).with_name(".env"))
 
@@ -46,7 +46,7 @@ def verificar_configuracao_csrf():
         request.max_content_length = 4 * 1024 * 1024
     if request.endpoint == "adicionar_foto" and not app.secret_key:
         return render_template("foto.html", mensagem=INDISPONIVEL), 503
-    if request.endpoint in ("login", "minha_conta", "logout", "anunciar", "editar_anuncio", "publicar_anuncio") and not app.secret_key:
+    if request.endpoint in ("login", "minha_conta", "logout", "anunciar", "editar_anuncio", "publicar_anuncio", "adotar_anuncio") and not app.secret_key:
         return render_template("login.html", indisponivel=True,
                                mensagem="Acesso à conta indisponível no momento. Tente novamente mais tarde."), 503
     if request.endpoint == "cadastro" and not app.secret_key:
@@ -70,6 +70,20 @@ def arquivo_grande(error):
 
 @app.errorhandler(CSRFError)
 def erro_csrf(error):
+    if request.endpoint == "adotar_anuncio":
+        return render_template_string("""
+            {% extends "base.html" %}
+            {% block title %}Confirmação da adoção — Adotaê{% endblock %}
+            {% block content %}
+            <section class="container registration" aria-labelledby="adocao-titulo">
+                <div class="registration-card">
+                    <h1 id="adocao-titulo">Confirmação da adoção recusada</h1>
+                    <p class="registration-message" role="alert">A confirmação da adoção foi recusada por CSRF inválido ou expirado. Recarregue sua conta e tente novamente.</p>
+                    <a class="text-link" href="{{ url_for('minha_conta') }}">Voltar à minha conta</a>
+                </div>
+            </section>
+            {% endblock %}
+        """), 400
     if request.endpoint == "adicionar_foto":
         # Não oferecer upload sem consultar novamente propriedade e reservas.
         return render_template("foto.html", mensagem=(
@@ -250,6 +264,41 @@ def editar_anuncio(animal_id):
     return redirect(url_for("minha_conta"))
 
 
+@app.get("/anuncios/<uuid:animal_id>/miniatura")
+def miniatura_propria(animal_id):
+    if g.auth_indisponivel:
+        abort(503)
+    if not g.usuario:
+        abort(401)
+    try:
+        # O join exige propriedade mesmo quando a RLS permitir leitura pública.
+        fotos = (g.auth_cliente.table("animal_fotos")
+                 .select("id,animal_id,estado,animais!inner(id,usuario_id)")
+                 .eq("animal_id", str(animal_id))
+                 .eq("animais.usuario_id", str(g.usuario.id)).eq("estado", "pronta")
+                 .order("posicao").order("id").limit(1).execute().data)
+        if fotos == []:
+            abort(404)
+        if not isinstance(fotos, list) or len(fotos) != 1 or not isinstance(fotos[0], dict):
+            raise ValueError("Resposta de fotografia inválida")
+        foto = fotos[0]
+        animal = foto.get("animais")
+        if (foto.get("animal_id") != str(animal_id) or foto.get("estado") != "pronta"
+                or not isinstance(animal, dict) or animal.get("id") != str(animal_id)
+                or animal.get("usuario_id") != str(g.usuario.id)):
+            abort(404)
+        foto_id = str(UUID(foto["id"]))
+        caminho = f"{g.usuario.id}/{animal_id}/{foto_id}.webp"
+        # Download autenticado: nenhum link de Storage ou JWT vai para o HTML.
+        conteudo = g.auth_cliente.storage.from_("animal-fotos").download(caminho)
+        return Response(criar_miniatura(conteudo), mimetype="image/webp", headers={
+            "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff",
+        })
+    except (APIError, StorageApiError, HTTPError, SupabaseException,
+            ValueError, TypeError, KeyError):
+        abort(503)
+
+
 def consultar_publicacao_propria(animal_id):
     """Lê apenas o estado do anúncio próprio; nunca aceita outra identidade."""
     registros = (g.auth_cliente.table("animais")
@@ -323,6 +372,78 @@ def executar_publicacao(animal_id):
               "antes de tentar novamente.", "rascunho-aviso")
     else:
         flash("A publicação não foi confirmada. Na consulta, o anúncio continua como rascunho. "
+              "Confira ‘Meus anúncios’ antes de tentar novamente.", "rascunho-aviso")
+    return redirect(url_for("minha_conta"))
+
+
+def consultar_adocao_propria(animal_id):
+    """Valida identidade e estados usando somente a sessão do proprietário."""
+    registros = (g.auth_cliente.table("animais")
+                 .select("id,usuario_id,status_publicacao,status_adocao")
+                 .eq("id", str(animal_id)).eq("usuario_id", str(g.usuario.id))
+                 .execute().data)
+    if registros == []:
+        return None
+    if not isinstance(registros, list) or len(registros) != 1 or not isinstance(registros[0], dict):
+        raise ValueError("Resposta de leitura inválida")
+    animal = registros[0]
+    if animal.get("id") != str(animal_id) or animal.get("usuario_id") != str(g.usuario.id):
+        return None
+    if (animal.get("status_publicacao") not in ("rascunho", "publicado")
+            or animal.get("status_adocao") not in ("disponivel", "adotado")):
+        raise ValueError("Estado do anúncio inválido")
+    return animal
+
+
+@app.post("/anuncios/<uuid:animal_id>/adotar")
+def adotar_anuncio(animal_id):
+    if g.auth_indisponivel:
+        return render_template("login.html", indisponivel=True, mensagem=INDISPONIVEL), 503
+    if not g.usuario:
+        return redirect(url_for("login"))
+    if request.form.getlist("confirmar_adocao") != ["sim"]:
+        flash("É necessária a confirmação explícita da adoção. Confira o aviso no cartão do animal.",
+              "rascunho-aviso")
+        return redirect(url_for("minha_conta"))
+    falhas = (APIError, HTTPError, SupabaseException, ValueError, TypeError)
+    try:
+        animal = consultar_adocao_propria(animal_id)
+    except falhas:
+        flash("Não foi possível consultar o anúncio agora. Tente novamente mais tarde.", "rascunho-aviso")
+        return redirect(url_for("minha_conta"))
+    if animal is None or animal["status_publicacao"] != "publicado":
+        flash("Anúncio indisponível para adoção.", "rascunho-aviso")
+        return redirect(url_for("minha_conta"))
+    if animal["status_adocao"] == "adotado":
+        flash("Este anúncio já está adotado.", "rascunho-aviso")
+        return redirect(url_for("minha_conta"))
+
+    codigo = None
+    try:
+        # A RPC é a autoridade final. Uma resposta perdida pode ocorrer após o
+        # COMMIT: nunca repetir automaticamente, nem confiar no retorno void.
+        g.auth_cliente.rpc("marcar_adotado", {"p_animal_id": str(animal_id)}).execute()
+    except APIError as erro:
+        codigo = erro.code
+    except falhas:
+        pass
+    try:
+        animal = consultar_adocao_propria(animal_id)
+    except falhas:
+        animal = None
+    if animal is not None and animal["status_adocao"] == "adotado":
+        flash("Adoção confirmada com sucesso!", "rascunho-sucesso")
+    elif animal is None:
+        flash("O resultado da adoção é incerto. Confira ‘Meus anúncios’ antes de tentar novamente.",
+              "rascunho-aviso")
+    elif codigo == "42501":
+        flash("Não foi possível confirmar a adoção. Na consulta, o anúncio continua disponível. "
+              "Confira ‘Meus anúncios’ antes de tentar novamente.", "rascunho-aviso")
+    elif codigo == "55P03":
+        flash("O anúncio está sendo utilizado em outra operação. Aguarde e confira ‘Meus anúncios’ "
+              "antes de tentar novamente.", "rascunho-aviso")
+    else:
+        flash("A adoção não foi confirmada. Na consulta, o anúncio continua disponível. "
               "Confira ‘Meus anúncios’ antes de tentar novamente.", "rascunho-aviso")
     return redirect(url_for("minha_conta"))
 
