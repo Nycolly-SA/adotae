@@ -12,7 +12,11 @@
     {% if not publico %}<div class="catalog-notice"><span class="note-symbol" aria-hidden="true">i</span><p>Página demonstrativa: o animal e os dados são fictícios. Ainda não é possível solicitar uma adoção por aqui.</p></div>{% endif %}
     <div class="detail-layout">
         {% if publico %}
+        {% if animal.foto_url %}
+        <img class="detail-image" src="{{ animal.foto_url }}" alt="Fotografia de {{ animal.nome }}" width="480" height="400" referrerpolicy="no-referrer">
+        {% else %}
         <div class="detail-image card-image-unavailable"><p>Fotografia temporariamente indisponível</p></div>
+        {% endif %}
         {% else %}
         <img class="detail-image" src="{{ url_for('static', filename='images/' ~ animal.imagem) }}" alt="{{ animal.imagem_alt }}" width="480" height="400">
         {% endif %}

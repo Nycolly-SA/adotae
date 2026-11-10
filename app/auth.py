@@ -104,7 +104,7 @@ def registrar_auth(app):
                 or request.cookies.get(ACCESS_COOKIE) or request.cookies.get(REFRESH_COOKIE)
                 or getattr(g, "auth_tokens", None)):
             response.headers["Cache-Control"] = "no-store"
-        if request.endpoint in ("confirmar_email", "animais"):
+        if request.endpoint in ("confirmar_email", "animais", "animal_detalhes_publico"):
             response.headers["Referrer-Policy"] = "no-referrer"
         return response
 

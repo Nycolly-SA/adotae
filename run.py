@@ -550,7 +550,7 @@ def animais():
 
 
 def adicionar_fotos_catalogo(cliente, registros, animais):
-    """Consulta reservas em conjunto; falhas de fotos preservam o catálogo."""
+    """Adiciona fotos aos anúncios públicos validados; falhas preservam os dados."""
     if not animais:
         return
     try:
@@ -637,10 +637,11 @@ def validar_catalogo(registros):
 def animal_detalhes_publico(animal_id):
     try:
         # Mesmo após login, nunca usar as permissões do proprietário nesta página.
-        registros = (novo_cliente().table("animais")
+        cliente = novo_cliente()
+        registros = (cliente.table("animais")
                      .select("id,nome,especie,sexo,idade_aproximada,porte,descricao,distrito,"
                              "especie_outro,bairro,email_contato,whatsapp,"
-                             "status_publicacao,status_adocao,oculto_admin")
+                             "status_publicacao,status_adocao,oculto_admin,usuario_id")
                      .eq("id", str(animal_id)).eq("status_publicacao", "publicado")
                      .eq("status_adocao", "disponivel").eq("oculto_admin", False)
                      .execute().data)
@@ -677,6 +678,7 @@ def animal_detalhes_publico(animal_id):
             animal["email_link"] = "mailto:" + quote(animal["email_contato"], safe="@")
     except (APIError, HTTPError, SupabaseException, ValueError, TypeError):
         return render_template("animal_detalhes.html", publico=True, indisponivel=True), 503
+    adicionar_fotos_catalogo(cliente, registros, [animal])
     return render_template("animal_detalhes.html", animal=animal, publico=True)
 
 

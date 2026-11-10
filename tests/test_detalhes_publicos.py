@@ -1,6 +1,7 @@
 """Detalhes públicos com SDK Supabase real e transporte HTTP offline."""
 
 import copy
+import json
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -11,8 +12,11 @@ from run import app
 
 
 class DetalhesPublicosTests(unittest.TestCase):
-    # Reutiliza apenas o transporte; as regressões continuam em test_routes.
+    # Reutiliza transporte e auxiliares; as regressões do catálogo ficam em test_routes.
     catalog_calls = test_routes.RouteTests.catalog_calls
+    photo = test_routes.RouteTests.photo
+    photo_calls = test_routes.RouteTests.photo_calls
+    sign_calls = test_routes.RouteTests.sign_calls
 
     def setUp(self):
         test_routes.RouteTests.setUp(self)
@@ -23,6 +27,7 @@ class DetalhesPublicosTests(unittest.TestCase):
         response = self.client.get(self.path)
         self.assertEqual(response.status_code, status)
         self.assertEqual(response.headers.get("Cache-Control"), "no-store")
+        self.assertEqual(response.headers.get("Referrer-Policy"), "no-referrer")
         return response
 
     def test_public_details_and_exact_anonymous_query(self):
@@ -44,12 +49,13 @@ class DetalhesPublicosTests(unittest.TestCase):
         call = self.catalog_calls()[-1]
         self.assertEqual(dict(call.url.params), dict(
             select="id,nome,especie,sexo,idade_aproximada,porte,descricao,distrito,"
-                   "especie_outro,bairro,email_contato,whatsapp,status_publicacao,status_adocao,oculto_admin",
+                   "especie_outro,bairro,email_contato,whatsapp,status_publicacao,status_adocao,oculto_admin,usuario_id",
             id="eq." + self.row["id"], status_publicacao="eq.publicado",
             status_adocao="eq.disponivel", oculto_admin="eq.false"))
         self.assertEqual(call.headers["authorization"], "Bearer sb_publishable_test")
         self.assertEqual(call.headers["apikey"], "sb_publishable_test")
-        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(len(self.photo_calls()), 1)
+        self.assertEqual(self.sign_calls(), [])
 
     def test_authenticated_owner_has_only_public_access(self):
         self.details()
@@ -89,6 +95,7 @@ class DetalhesPublicosTests(unittest.TestCase):
         self.details(503)
 
     def test_unavailable_animals_are_404_without_contacts(self):
+        self.photos = [self.photo()]
         for field, value in (("status_publicacao", "rascunho"),
                              ("status_adocao", "adotado"), ("oculto_admin", True)):
             with self.subTest(field=field):
@@ -99,8 +106,11 @@ class DetalhesPublicosTests(unittest.TestCase):
                 self.row[field] = original
         self.rows = []
         self.details(404)
+        self.assertEqual(self.photo_calls(), [])
+        self.assertEqual(self.sign_calls(), [])
 
     def test_returned_restricted_record_never_exposes_contacts(self):
+        self.photos = [self.photo()]
         self.override_payload = True
         for field, value in (("status_publicacao", "rascunho"),
                              ("status_adocao", "adotado"), ("oculto_admin", True)):
@@ -109,6 +119,8 @@ class DetalhesPublicosTests(unittest.TestCase):
                 response = self.details(404)
                 self.assertNotIn(self.row["email_contato"], response.text)
                 self.assertNotIn(self.row["whatsapp"], response.text)
+        self.assertEqual(self.photo_calls(), [])
+        self.assertEqual(self.sign_calls(), [])
 
     def test_availability_is_checked_again_and_secret_is_not_required(self):
         with patch.dict(app.config, {"SECRET_KEY": None}):
@@ -157,8 +169,10 @@ class DetalhesPublicosTests(unittest.TestCase):
                 self.assertNotIn("mailto:", response.text)
                 self.assertNotIn("https://wa.me/", response.text)
                 self.assertNotIn('id="nome-animal"', response.text)
+        self.assertEqual(self.photo_calls(), [])
+        self.assertEqual(self.sign_calls(), [])
 
-    def test_escape_and_no_private_data_or_storage(self):
+    def test_escape_and_no_private_data_without_photo(self):
         self.row.update(nome='<script>alert("x")</script>', bairro='<img src=x onerror="x">',
                         descricao="<script>private-script</script>", email_contato="a+tag@example.org")
         response = self.details()
@@ -169,9 +183,117 @@ class DetalhesPublicosTests(unittest.TestCase):
         self.assertIn("mailto:a%2Btag@example.org", response.text)
         for value in (user()["id"], "usuario_id", "sb_publishable_test", "private-refresh"):
             self.assertNotIn(value, response.text)
-        self.assertTrue(all(call.url.path == "/rest/v1/animais" for call in self.calls))
+        self.assertEqual(self.sign_calls(), [])
+
+    def assert_photo_unavailable(self):
+        response = self.details()
+        page = test_routes.PageParser()
+        page.feed(response.text)
+        self.assertEqual(page.images, [])
+        self.assertIn("Fotografia temporariamente indisponível", response.text)
+        self.assertIn("mailto:private-contact@example.org", page.links)
+        self.assertIn("https://wa.me/5522999999999", page.links)
+        return response
+
+    def test_photo_uses_single_anonymous_signature_even_after_login(self):
+        self.photos = [self.photo(), self.photo(1, 2)]
+        for logged_in in (False, True):
+            with self.subTest(logged_in=logged_in):
+                if logged_in:
+                    self.client.set_cookie("adotae_access", jwt())
+                    self.client.set_cookie("adotae_refresh", "private-refresh")
+                self.calls.clear()
+                with patch("run.render_template", wraps=__import__("run").render_template) as render:
+                    response = self.details()
+                    self.assertNotIn("usuario_id", render.call_args.kwargs["animal"])
+                page = test_routes.PageParser()
+                page.feed(response.text)
+                path = f'{user()["id"]}/{self.row["id"]}/{self.photos[0]["id"]}.webp'
+                self.assertEqual(len(page.images), 1)
+                self.assertEqual(page.images[0]["src"],
+                    "https://example.supabase.co/storage/v1/object/sign/animal-fotos/" + path + "?token=signature.test")
+                self.assertEqual(page.images[0]["alt"], "Fotografia de Bento")
+                self.assertEqual(page.images[0]["class"], "detail-image")
+                self.assertEqual(page.images[0]["referrerpolicy"], "no-referrer")
+                self.assertNotIn("Fotografia temporariamente indisponível", response.text)
+                self.assertIn("mailto:private-contact@example.org", page.links)
+                self.assertIn("https://wa.me/5522999999999", page.links)
+                self.assertEqual(len(self.photo_calls()), 1)
+                self.assertEqual(dict(self.photo_calls()[0].url.params), dict(
+                    select="id,animal_id,estado", animal_id=f'in.({self.row["id"]})', estado="eq.pronta"))
+                self.assertEqual(len(self.sign_calls()), 1)
+                sign = self.sign_calls()[0]
+                self.assertEqual(sign.method, "POST")
+                self.assertEqual(json.loads(sign.content), {"expiresIn": "60"})
+                for call in self.calls:
+                    if not call.url.path.endswith("/user"):
+                        self.assertEqual(call.headers["authorization"], "Bearer sb_publishable_test")
+                        self.assertEqual(call.headers["apikey"], "sb_publishable_test")
+                for private in ("usuario_id", "private-refresh", jwt(), "sb_publishable_test"):
+                    self.assertNotIn(private, response.text)
+
+    def test_photo_selection_and_escaped_alt_preserve_layout(self):
+        self.row["nome"] = '<Bento "amigo">'
+        self.photos = [self.photo(0, 9), self.photo(0, 2)]
+        for _ in range(2):
+            page = test_routes.PageParser()
+            response = self.details()
+            page.feed(response.text)
+            self.assertEqual(len(page.images), 1)
+            self.assertIn(self.photo(0, 2)["id"], page.images[0]["src"])
+            self.assertEqual(page.images[0]["alt"], 'Fotografia de <Bento "amigo">')
+            self.assertNotIn('<Bento "amigo">', response.text)
+            self.assertIn('class="detail-layout"', response.text)
+            self.photos.reverse()
+
+    def test_missing_photo_and_reservation_errors_preserve_contacts(self):
+        self.assert_photo_unavailable()
+        for failure in (403, "network"):
+            with self.subTest(failure=failure):
+                self.photo_failure = failure
+                self.assert_photo_unavailable()
+        self.photo_failure = None
+        for payload in ({}, "private", 42, [None, {}, self.photo(estado="pendente"),
+                         self.photo(id="invalid"), self.photo(1, 2)]):
+            with self.subTest(payload=payload):
+                self.reservation_payload = payload
+                self.assert_photo_unavailable()
+        self.assertEqual(self.sign_calls(), [])
+
+    def test_signing_errors_and_invalid_urls_preserve_contacts(self):
+        self.photos = [self.photo()]
+        self.sign_failure = {self.photos[0]["id"]}
+        self.assert_photo_unavailable()
+        self.sign_failure = set()
+        self.sign_network_failure = True
+        self.assert_photo_unavailable()
+        self.sign_network_failure = False
+        for payload in ({}, [], {"signedURL": 123},
+                        {"signedURL": "/https://evil.example/image?token=secret"},
+                        {"signedURL": "/object/public/animal-fotos/x?token=x"},
+                        {"signedURL": "/object/sign/animal-fotos/wrong.webp?token=x"}):
+            with self.subTest(payload=payload):
+                self.sign_payload = payload
+                response = self.assert_photo_unavailable()
+                self.assertNotIn("evil.example", response.text)
+
+    def test_invalid_owner_only_disables_photo(self):
+        self.photos = [self.photo()]
+        for owner in (None, "invalid", 123):
+            self.row["usuario_id"] = owner
+            self.assert_photo_unavailable()
+        self.assertEqual(self.sign_calls(), [])
+
+    def test_photo_urls_and_errors_are_not_logged(self):
+        self.photos = [self.photo()]
+        for failure in (False, True):
+            self.sign_network_failure = failure
+            with self.assertLogs("httpx", level="INFO") as logs:
+                self.details()
+            self.assertNotIn("token=", "\n".join(logs.output))
 
     def test_responsive_structure_is_preserved(self):
+        self.photos = [self.photo()]
         html = self.details().text
         self.assertIn('name="viewport"', html)
         self.assertIn('class="detail-layout"', html)
