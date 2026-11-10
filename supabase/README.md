@@ -1,5 +1,72 @@
 # Banco de dados — etapa SQL
 
+## Marcar anúncio como adotado — validada em adotae-testes
+
+A migração [202611100001_marcar_adotado.sql](migrations/202611100001_marcar_adotado.sql)
+requer todas as anteriores. Foi aplicada e validada no Supabase **adotae-testes
+em 10/11/2026**, conforme os resultados informados das 12 verificações reais
+registradas na seção de diagnóstico de adoção abaixo. A operação foi realizada
+pela Data API, com URL e chave publicável de adotae-testes e contas fictícias,
+**sem utilização de `service_role`**. Essa validação não certifica o projeto
+principal. **A interface Flask ainda não implementa a ação de marcar como adotado.**
+
+A RPC `public.marcar_adotado(p_animal_id uuid)` retorna `void` e permite somente
+ao proprietário autenticado, identificado por `auth.uid()`, mudar seu anúncio
+`publicado` e `disponivel` para `adotado`. Aceita anúncio já ocultado pela
+administração, preservando `oculto_admin`. Altera explicitamente apenas
+`status_adocao`; o trigger existente atualiza `atualizado_em`. Não altera
+publicação, contatos, fotografias ou objetos, nem exclui o anúncio.
+Identidade ausente, parâmetro nulo, anúncio inexistente, alheio, rascunho ou já
+adotado geram `42501`. A segunda tentativa é recusada sem novo UPDATE ou mudança
+de data. **Não existe operação inversa para usuários comuns.**
+
+Segue o padrão de publicação: entrada pública `SECURITY INVOKER` delega à
+função `SECURITY DEFINER` em `adotae_private`, fora dos schemas expostos na API.
+Ambas pertencem a `postgres`, usam `search_path` vazio e concedem EXECUTE somente
+a `authenticated` além do proprietário da função. EXECUTE é revogado de PUBLIC,
+`anon` e `service_role`; chamadas SQL diretas à auxiliar também validam identidade,
+propriedade e estado. Não recebe ID de proprietário nem exige nova confirmação
+de e-mail. Não usa `service_role` na aplicação. Preserva triggers, RLS, políticas
+Storage e grants de tabelas/colunas; aborta se detectar UPDATE efetivo de
+`status_adocao` para `authenticated`. O UPDATE direto continua bloqueado.
+
+O bloqueio `FOR NO KEY UPDATE` é adquirido somente no anúncio próprio até o fim
+da transação, sem bloquear fotos ou objetos depois dele. Evita inverter a ordem
+foto → animal das operações anteriores e é compatível com `KEY SHARE` das FKs.
+Em `READ COMMITTED`, duas adoções concorrentes se serializam: a segunda aguarda,
+revalida a linha após o COMMIT e recebe `42501`. Se a primeira transação for
+desfeita, a segunda pode adotar. Em isolamentos mais fortes, conflitos podem
+retornar erro de serialização; transações SQL externas que combinem operações
+em ordem inversa continuam responsáveis pelo tratamento de conflitos.
+
+Pelas regras de visibilidade existentes, após a adoção o anúncio deixa de ser
+legível publicamente no catálogo e nos detalhes, inclusive por outros usuários
+autenticados; continua acessível ao proprietário. As reservas deixam de ser
+visíveis para `anon` e novas assinaturas públicas de fotografias são recusadas.
+As fotografias e objetos permanecem armazenados, com acesso do proprietário
+preservado pelas políticas atuais. URLs assinadas já emitidas **não são revogadas**
+pela transição e podem funcionar até a expiração; respostas em cache podem
+continuar acessíveis. Não há garantia de revogação imediata nem novo limite de TTL.
+
+Os [testes de adoção](tests/test_adocao_local.py) reutilizam o PostgreSQL
+descartável e executam também as regressões de fotografias e visibilidade após
+instalar a migração. Comparam grants, RLS e triggers antes/depois, validam os
+papéis, campos, data, irreversibilidade, ocultação e duas sessões concorrentes.
+Executar a descoberta SQL local e a suíte Python pelos comandos da seção de
+publicação abaixo. Auth e Storage continuam sendo stubs locais: esses testes
+não validam PostgREST, Storage HTTP, URLs assinadas ou bytes reais e **não
+equivalem à validação remota** registrada separadamente neste documento.
+
+Validação local em 10/11/2026, informada anteriormente:
+
+- **87 testes SQL locais** aprovados, incluindo regressões herdadas.
+- **247 testes Python** aprovados.
+
+Esses resultados são separados das 12 verificações remotas. As suítes locais
+não foram reexecutadas nesta atualização documental. Na validação local
+anterior, `git diff --check` não apresentou erros e a revisão independente do
+diff não apontou defeitos concretos.
+
 ## Assinatura pública individual de fotografias — validada em adotae-testes
 
 A migração [202611080003_fotos_publicas_assinatura.sql](migrations/202611080003_fotos_publicas_assinatura.sql)
@@ -1143,6 +1210,111 @@ novos identificadores e não limpa automaticamente uma execução anterior.
 Após a execução futura, remova as duas variáveis temporárias do terminal com
 `Remove-Item Env:ADOTAE_TEST_SUPABASE_URL` e
 `Remove-Item Env:ADOTAE_TEST_SUPABASE_PUBLISHABLE_KEY`.
+
+### Diagnóstico da adoção real — validado em adotae-testes em 10/11/2026
+
+Conforme os resultados informados, **as 12 verificações reais foram aprovadas
+em 10/11/2026 no Supabase adotae-testes**. A operação usou a Data API, URL e chave
+publicável do projeto e contas fictícias, sem `service_role`. O registro abaixo
+documenta essa execução; nenhuma operação remota foi realizada nesta atualização.
+
+`supabase/tests/validar_adocao.py` reutiliza os controles dos roteiros anteriores:
+somente `ADOTAE_TEST_SUPABASE_URL` e `ADOTAE_TEST_SUPABASE_PUBLISHABLE_KEY`,
+chave `sb_publishable_`, sem `.env`, Flask, SQL administrativo ou `service_role`.
+Não aplica migrações, altera políticas/grants nem cria ou exclui fixtures.
+A migração `202611100001_marcar_adotado.sql` foi informada como aplicada pelo
+operador em **adotae-testes**, onde a validação real foi concluída.
+
+Antes de executar, confirme no painel a referência do projeto e use contas
+**fictícias comuns**, distintas, A e B, com e-mails confirmados. Pela interface,
+identifique dois anúncios de A sem uso importante ou compartilhado e anote seus
+UUIDs exatos: um publicado, disponível, visível e com fotografia pronta; outro
+rascunho disponível. Se não existirem, **crie-os pela interface antes do teste**.
+O script não procura anúncios por nome nem escolhe automaticamente um registro.
+O roteiro exige a indicação manual dos UUIDs das fixtures.
+
+Em PowerShell, em terminal interativo privado, sem gravação/transcrição:
+
+```powershell
+$env:ADOTAE_TEST_SUPABASE_URL = 'https://<referencia-de-adotae-testes>.supabase.co'
+$env:ADOTAE_TEST_SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_<chave-publicavel-de-testes>'
+.\.venv\Scripts\python.exe supabase/tests/validar_adocao.py
+```
+
+Esses valores são placeholders; não use as variáveis da aplicação nem credenciais
+administrativas. A URL e a chave devem corresponder ao mesmo **adotae-testes**.
+Confirme a referência independentemente no painel: a chave publicável não informa
+o nome do projeto. As credenciais das duas contas são solicitadas no terminal,
+com senha oculta e validação da identidade no Auth; não são salvas.
+
+O roteiro pede `AUTORIZAR adotae-testes <referência>` **antes de criar clientes**:
+isso autoriza login, leituras, assinaturas públicas de controle e tentativas
+negativas. Depois exige `FIXTURES DESCARTAVEIS` e os dois UUIDs. Até as tentativas
+negativas podem alterar uma fixture se a proteção estiver incorreta; por isso
+ambos os registros devem ser descartáveis. Não execute sem essa autorização.
+
+Resultados informados das **12 verificações aprovadas no Supabase real**:
+
+1. A RPC foi recusada para o visitante com `42501`.
+2. A RPC sobre o anúncio publicado de A foi recusada para B, outro proprietário,
+   com `42501`.
+3. A RPC sobre o próprio rascunho foi recusada para A com `42501`.
+4. O UPDATE direto de `status_adocao` por A foi recusado com `42501`.
+5. Após **cada** tentativa recusada, os dois registros inteiros, todas as reservas
+   e os bytes das fotografias prontas permaneceram preservados. O controle positivo
+   anterior confirmou catálogo, detalhes, metadados e assinatura pública disponíveis.
+6. A chamada positiva à RPC foi realizada com sucesso pelo proprietário A,
+   após a autorização explícita da adoção do anúncio indicado.
+7. A consulta como A confirmou `status_adocao = 'adotado'`.
+8. Somente `status_adocao` e `atualizado_em` mudaram no anúncio; a data avançou.
+   Os demais campos, o rascunho, as reservas e os bytes das fotografias prontas
+   foram preservados.
+9. A consulta anônima do catálogo, filtrada pelo UUID, retornou zero linhas:
+   o anúncio adotado deixou de aparecer no catálogo anônimo.
+10. A consulta anônima de detalhes por UUID, sem filtro de status, e a dos
+    metadados das fotografias retornaram zero linhas; detalhes e metadados
+    públicos ficaram inacessíveis após a adoção.
+11. Novas assinaturas públicas anônimas de **todas** as fotos prontas foram
+    recusadas por permissão ou ausência conhecida. Rede, sessão expirada,
+    RPC/bucket ausente, limite de requisições e erros internos não contam como
+    bloqueio aprovado.
+12. A segunda chamada como A foi recusada com `42501`, sem alteração adicional
+    dos registros, reservas ou bytes em comparação ao estado após a adoção.
+
+Retorno **0**: etapas 1–12 aprovadas nessa execução. Retorno **2**: etapas 1–5
+aprovadas, adoção não autorizada e etapas 6–12 **não executadas**. Retorno **1**:
+falha, interrupção ou encerramento de sessão inconclusivo. Não há repetição
+automática, reversão ou limpeza. Se a resposta da adoção se perder, consulte o
+registro como A antes de qualquer nova tentativa: a transação pode ter concluído.
+
+Snapshots e bytes ficam somente em memória. Os resultados podem ser registrados
+pelas linhas `OK`, `PARCIAL`, `APROVADO` ou `NÃO APROVADO`, sem compartilhar a
+entrada de credenciais. URLs assinadas de controle duram 60 segundos, não são
+impressas, persistidas nem consumidas. O roteiro verifica **novas assinaturas**;
+não comprova invalidação de URLs já emitidas nem de caches. A comparação abrange
+as duas fixtures e suas fotos, sem acesso a outras linhas, metadados internos
+de `storage.objects`, `xmin` ou `ctid`.
+
+**Verificação Flask separada:** continuam pendentes a ação de marcar como
+adotado, sua autorização/CSRF, as mensagens e a atualização da interface após
+a adoção. Catálogo e detalhes já existentes requerem conferência HTTP/browser
+separada; as etapas 9–10 acima validam as consultas pela Data API, não as páginas
+Flask. Este script não implementa interface nem declara essas verificações
+aprovadas.
+
+Verificação exclusivamente offline do roteiro:
+
+```powershell
+.\.venv\Scripts\python.exe -m unittest tests.test_validacao_adocao -v
+.\.venv\Scripts\python.exe -m unittest discover -v
+```
+
+Depois de executar manualmente, remova as variáveis temporárias do terminal:
+
+```powershell
+Remove-Item Env:ADOTAE_TEST_SUPABASE_URL
+Remove-Item Env:ADOTAE_TEST_SUPABASE_PUBLISHABLE_KEY
+```
 
 Para validar **somente localmente**, sem operações remotas:
 
