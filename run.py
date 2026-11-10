@@ -41,7 +41,7 @@ app.config.update(
 
 @app.before_request
 def verificar_configuracao_csrf():
-    if request.endpoint in ("anunciar", "adicionar_foto"):
+    if request.endpoint in ("anunciar", "adicionar_foto", "editar_anuncio"):
         # Uma imagem de até 3 MiB mais campos e envelope multipart.
         request.max_content_length = 4 * 1024 * 1024
     if request.endpoint == "adicionar_foto" and not app.secret_key:
@@ -60,6 +60,11 @@ CSRFProtect(app)
 
 @app.errorhandler(413)
 def arquivo_grande(error):
+    if request.endpoint == "editar_anuncio":
+        return render_template("anunciar.html", edicao=True, indisponivel=True,
+                               animal_id=request.view_args["animal_id"], mensagem=(
+                                   "O envio excedeu o limite de 4 MiB. Use uma fotografia de até 3 MiB. "
+                                   "Recarregue a edição para conferir o rascunho antes de enviar.")), 413
     if request.endpoint == "adicionar_foto":
         return render_template("foto.html", mensagem=(
             "O envio excedeu o limite de 4 MiB. Use uma fotografia de até 3 MiB. "
@@ -89,11 +94,11 @@ def erro_csrf(error):
         return render_template("foto.html", mensagem=(
             "Não foi possível validar o formulário. Recarregue a página e tente novamente.")), 400
     if request.endpoint == "editar_anuncio":
-        return render_template("anunciar.html", form=AnimalForm(OPCOES_FILTROS),
+        return render_template("anunciar.html", indisponivel=True,
                                edicao=True, animal_id=request.view_args["animal_id"],
                                mensagem="Não foi possível validar o formulário. Recarregue a página e tente novamente."), 400
     if request.endpoint == "anunciar":
-        return render_template("anunciar.html", form=AnimalForm(OPCOES_FILTROS),
+        return render_template("anunciar.html", indisponivel=True,
                                mensagem="Não foi possível validar o formulário. Recarregue a página e tente novamente."), 400
     if request.endpoint != "cadastro":
         return render_template("login.html", form=LoginForm(formdata=None),
@@ -214,18 +219,18 @@ def editar_anuncio(animal_id):
     mensagem = "Não foi possível carregar o rascunho agora. Tente novamente mais tarde."
     try:
         registros = (g.auth_cliente.table("animais")
-                     .select(",".join(("id", "usuario_id", "status_publicacao", *campos)))
+                     .select(",".join(("id", "usuario_id", "status_publicacao", "status_adocao", *campos)))
                      .eq("id", str(animal_id)).eq("usuario_id", str(g.usuario.id))
-                     .eq("status_publicacao", "rascunho").execute().data)
+                     .eq("status_publicacao", "rascunho").eq("status_adocao", "disponivel").execute().data)
         if registros == []:
             abort(404)
         if not isinstance(registros, list) or len(registros) != 1 or not isinstance(registros[0], dict):
             raise ValueError("Resposta de leitura inválida")
         animal = registros[0]
-        if any(campo not in animal for campo in ("id", "usuario_id", "status_publicacao")):
+        if any(campo not in animal for campo in ("id", "usuario_id", "status_publicacao", "status_adocao")):
             raise ValueError("Identificação de rascunho ausente")
         if (animal.get("id") != str(animal_id) or animal.get("usuario_id") != str(g.usuario.id)
-                or animal.get("status_publicacao") != "rascunho"):
+                or animal.get("status_publicacao") != "rascunho" or animal.get("status_adocao") != "disponivel"):
             abort(404)
         opcionais = ("especie_outro", "bairro", "email_contato", "whatsapp")
         if any(campo not in animal or (
@@ -234,10 +239,32 @@ def editar_anuncio(animal_id):
             raise ValueError("Dados de rascunho inválidos")
     except (APIError, HTTPError, SupabaseException, ValueError, TypeError):
         return render_template("anunciar.html", **contexto, indisponivel=True, mensagem=mensagem), 503
+    try:
+        contexto["reservas"] = consultar_reservas(str(animal_id))
+    except (APIError, HTTPError, SupabaseException, ValueError, TypeError):
+        return render_template("anunciar.html", **contexto, indisponivel=True, mensagem=(
+            "Não foi possível consultar as fotografias do rascunho. Recarregue a edição antes de enviar.")), 503
     if request.method == "GET":
         form = AnimalForm(OPCOES_FILTROS, formdata=None, data=animal)
         return render_template("anunciar.html", **contexto, form=form)
     if not form.validate_on_submit():
+        return render_template("anunciar.html", **contexto, form=form), 400
+    foto = None
+    try:
+        arquivos = request.files.getlist("foto")
+        if any(campo != "foto" for campo in request.files) or request.form.getlist("foto"):
+            raise FotoInvalida("Envie a fotografia somente pelo campo indicado.")
+        if len(arquivos) > 1:
+            raise FotoInvalida("Envie apenas uma fotografia nesta etapa.")
+        if arquivos and not form.foto.data and arquivos[0].stream.read(1):
+            raise FotoInvalida("Selecione uma fotografia válida com nome de arquivo.")
+        if form.foto.data:
+            if contexto["reservas"]:
+                form.foto.errors.append("Já existe uma fotografia ou operação de fotografia neste rascunho. Não é possível enviar outra.")
+                return render_template("anunciar.html", **contexto, form=form), 409
+            foto = processar_foto(form.foto.data)
+    except FotoInvalida as erro:
+        form.foto.errors.append(str(erro))
         return render_template("anunciar.html", **contexto, form=form), 400
     dados = form.dados_insert()
     mensagem = ("Não foi possível confirmar a atualização do rascunho. "
@@ -247,7 +274,7 @@ def editar_anuncio(animal_id):
         # mudança de proprietário entre a leitura e a gravação.
         registros = (g.auth_cliente.table("animais").update(dados)
                      .eq("id", str(animal_id)).eq("usuario_id", str(g.usuario.id))
-                     .eq("status_publicacao", "rascunho").execute().data)
+                     .eq("status_publicacao", "rascunho").eq("status_adocao", "disponivel").execute().data)
         if registros == []:
             return render_template("anunciar.html", **contexto, form=form, mensagem=(
                 "O rascunho não pôde ser atualizado. Volte à sua conta e confira se ele ainda está disponível para edição.")), 409
@@ -256,10 +283,20 @@ def editar_anuncio(animal_id):
         atualizado = registros[0]
         if (atualizado.get("id") != str(animal_id) or atualizado.get("usuario_id") != str(g.usuario.id)
                 or atualizado.get("status_publicacao") != "rascunho"
+                or atualizado.get("status_adocao") != "disponivel"
                 or any(campo not in atualizado or atualizado[campo] != valor for campo, valor in dados.items())):
             raise ValueError("Atualização não confirmada")
     except (APIError, HTTPError, SupabaseException, ValueError, TypeError):
         return render_template("anunciar.html", **contexto, form=form, mensagem=mensagem), 503
+    if foto is not None:
+        aviso = enviar_foto(str(animal_id), foto)
+        if aviso:
+            flash("Os dados foram salvos, mas a fotografia não foi confirmada. " + aviso +
+                  " Pode haver uma reserva ou arquivo aguardando recuperação, ainda indisponível pela interface. "
+                  "Confira o rascunho antes de tentar novamente. Não reenvie automaticamente.", "rascunho-aviso")
+        else:
+            flash("Os dados e a fotografia foram salvos! O anúncio continua como rascunho.", "rascunho-sucesso")
+        return redirect(url_for("minha_conta"))
     flash("Rascunho atualizado com sucesso!", "rascunho-sucesso")
     return redirect(url_for("minha_conta"))
 
@@ -491,6 +528,27 @@ def enviar_foto(animal_id, foto):
     return None
 
 
+def consultar_reservas(animal_id):
+    """Consulta e valida todas as reservas próprias, inclusive operações incompletas."""
+    reservas = (g.auth_cliente.table("animal_fotos").select("id,animal_id,posicao,estado")
+                .eq("animal_id", animal_id).execute().data)
+    if not isinstance(reservas, list) or len(reservas) > 3:
+        raise ValueError("Resposta de reservas inválida")
+    ids, posicoes = set(), set()
+    for reserva in reservas:
+        if (not isinstance(reserva, dict) or not isinstance(reserva.get("id"), str)
+                or reserva.get("animal_id") != animal_id
+                or type(reserva.get("posicao")) is not int or reserva["posicao"] not in (1, 2, 3)
+                or reserva.get("estado") not in ("pendente", "pronta", "removendo")):
+            raise ValueError("Reserva inválida")
+        foto_id = str(UUID(reserva["id"]))
+        if foto_id in ids or reserva["posicao"] in posicoes:
+            raise ValueError("Reserva duplicada")
+        ids.add(foto_id)
+        posicoes.add(reserva["posicao"])
+    return reservas
+
+
 @app.route("/anuncios/<uuid:animal_id>/foto", methods=["GET", "POST"])
 def adicionar_foto(animal_id):
     if g.auth_indisponivel:
@@ -499,36 +557,20 @@ def adicionar_foto(animal_id):
         return redirect(url_for("login"))
     animal_id = str(animal_id)
     try:
-        registros = (g.auth_cliente.table("animais").select("id,usuario_id,status_publicacao")
+        registros = (g.auth_cliente.table("animais").select("id,usuario_id,status_publicacao,status_adocao")
                      .eq("id", animal_id).eq("usuario_id", str(g.usuario.id))
-                     .eq("status_publicacao", "rascunho").execute().data)
+                     .eq("status_publicacao", "rascunho").eq("status_adocao", "disponivel").execute().data)
         if registros == []:
             abort(404)
         if (not isinstance(registros, list) or len(registros) != 1
                 or not isinstance(registros[0], dict)
-                or any(campo not in registros[0] for campo in ("id", "usuario_id", "status_publicacao"))):
+                or any(campo not in registros[0] for campo in ("id", "usuario_id", "status_publicacao", "status_adocao"))):
             raise ValueError("Resposta de rascunho inválida")
         animal = registros[0]
         if (animal["id"] != animal_id or animal["usuario_id"] != str(g.usuario.id)
-                or animal["status_publicacao"] != "rascunho"):
+                or animal["status_publicacao"] != "rascunho" or animal["status_adocao"] != "disponivel"):
             abort(404)
-        # Consultar todas as reservas, inclusive pendentes e em remoção.
-        reservas = (g.auth_cliente.table("animal_fotos").select("id,animal_id,posicao,estado")
-                    .eq("animal_id", animal_id).execute().data)
-        if not isinstance(reservas, list) or len(reservas) > 3:
-            raise ValueError("Resposta de reservas inválida")
-        ids, posicoes = set(), set()
-        for reserva in reservas:
-            if (not isinstance(reserva, dict) or not isinstance(reserva.get("id"), str)
-                    or reserva.get("animal_id") != animal_id
-                    or type(reserva.get("posicao")) is not int or reserva["posicao"] not in (1, 2, 3)
-                    or reserva.get("estado") not in ("pendente", "pronta", "removendo")):
-                raise ValueError("Reserva inválida")
-            foto_id = str(UUID(reserva["id"]))
-            if foto_id in ids or reserva["posicao"] in posicoes:
-                raise ValueError("Reserva duplicada")
-            ids.add(foto_id)
-            posicoes.add(reserva["posicao"])
+        reservas = consultar_reservas(animal_id)
     except (APIError, HTTPError, SupabaseException, ValueError, TypeError):
         return render_template("foto.html", mensagem=(
             "Não foi possível consultar o rascunho e suas fotografias agora. Tente novamente mais tarde.")), 503

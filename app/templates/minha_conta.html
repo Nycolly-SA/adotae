@@ -54,7 +54,6 @@
                     <p class="account-animal-note">Para publicar, o anúncio precisa de pelo menos um contato e uma fotografia pronta.</p>
                     <div class="account-animal-actions">
                         <a class="text-link" href="{{ url_for('editar_anuncio', animal_id=animal.id) }}">Editar dados</a>
-                        <a class="text-link" href="{{ url_for('adicionar_foto', animal_id=animal.id) }}">{{ 'Situação da foto' if animal.tem_foto else 'Adicionar foto' }}</a>
                         <form method="post" action="{{ url_for('publicar_anuncio', animal_id=animal.id) }}">
                             {{ form.csrf_token(id=false) }}
                             <button class="button" type="submit" aria-label="Publicar anúncio de {{ animal.nome }}">Publicar</button>

@@ -428,7 +428,8 @@ class LoginTests(unittest.TestCase):
                 self.list_result = [dict(animal, animal_fotos=[dict(estado="pronta")] if photo else [])]
                 page = self.client.get("/minha-conta")
                 self.assertIn("Editar dados", page.text)
-                self.assertIn("Situação da foto" if photo else "Adicionar foto", page.text)
+                self.assertNotIn('/foto"', page.text)
+                self.assertIn('/editar"', page.text)
                 self.assertIn("Para publicar, o anúncio precisa de pelo menos um contato e uma fotografia pronta.", page.text)
         self.list_result = [dict(animal, status_publicacao="publicado")]
         page = self.client.get("/minha-conta")

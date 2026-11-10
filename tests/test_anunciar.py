@@ -576,7 +576,7 @@ class AnunciarTests(unittest.TestCase):
             response = self.client.post("/anunciar", data=dict(data, csrf_token=token))
             self.assertEqual(response.status_code, 400)
             self.assertIn("Recarregue", response.text)
-            self.assertIn('value="Fubá"', response.text)
+            self.assertNotIn('type="file"', response.text)
         with patch.dict(app.config, WTF_CSRF_TIME_LIMIT=-1):
             self.assertEqual(self.client.post("/anunciar", data=data).status_code, 400)
         self.assertEqual(self.inserts(), [])

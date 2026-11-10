@@ -124,9 +124,9 @@ class AdotarTests(unittest.TestCase):
                                  publication == "publicado" and adoption == "disponivel")
                 self.assertEqual(f'href="/animais/{ANIMAL_ID}"' in page.text,
                                  publication == "publicado" and adoption == "disponivel" and not hidden)
-                for action in ("editar", "foto"):
-                    self.assertEqual(f'href="/anuncios/{ANIMAL_ID}/{action}"' in page.text,
-                                     publication == "rascunho")
+                self.assertEqual(f'href="/anuncios/{ANIMAL_ID}/editar"' in page.text,
+                                 publication == "rascunho")
+                self.assertNotIn(f'href="/anuncios/{ANIMAL_ID}/foto"', page.text)
                 if adoption == "adotado":
                     self.assertIn("Adotado", page.text)
                 elif publication == "publicado":

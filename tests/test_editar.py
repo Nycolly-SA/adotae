@@ -3,6 +3,7 @@ import json
 import re
 import unittest
 from io import BytesIO
+from PIL import Image
 from unittest.mock import patch
 
 import httpx
@@ -41,9 +42,25 @@ class EditarTests(unittest.TestCase):
         self.update_result = ATUALIZAR_NORMALMENTE
         self.failure = None
         self.failure_method = "PATCH"
+        self.reservas = []
+        self.photo_failure = None
+        self.photo_stage = None
+        self.foto_id = "00000000-0000-0000-0000-000000000020"
 
         def transport(request):
             self.calls.append(request)
+            path = request.url.path
+            if path == "/rest/v1/animal_fotos" or path.startswith("/storage/") or path.endswith("/confirmar_foto"):
+                stage = ("upload" if path.startswith("/storage/") else "confirmacao" if path.endswith("/confirmar_foto")
+                         else "reserva" if request.method == "POST" else "pronta" if "id" in request.url.params else "consulta")
+                if stage == self.photo_stage:
+                    if self.photo_failure == "network":
+                        raise httpx.ReadTimeout("private " + self.access)
+                    return httpx.Response(self.photo_failure, json=dict(message="private", code="23505"))
+                photo = dict(id=self.foto_id, animal_id=ANIMAL_ID, posicao=1, estado="pendente")
+                result = {"consulta": self.reservas, "reserva": [photo], "pronta": [dict(photo, estado="pronta")],
+                          "upload": {"Key": path.split("/object/")[-1]}, "confirmacao": None}[stage]
+                return httpx.Response(200, content=json.dumps(result), headers={"Content-Type": "application/json"})
             if request.url.path == "/rest/v1/animais":
                 if request.url.params.get("status_publicacao") == "eq.publicado":
                     # A consulta pública anônima não pode retornar este rascunho.
@@ -97,7 +114,7 @@ class EditarTests(unittest.TestCase):
     def updates(self):
         return [r for r in self.calls if r.method == "PATCH"]
 
-    def test_get_prefills_all_fields_without_photo_controls(self):
+    def test_get_prefills_all_fields_with_optional_first_photo(self):
         page = self.client.get(URL)
         self.assertEqual(page.status_code, 200)
         self.assertEqual(page.headers["Cache-Control"], "no-store")
@@ -107,16 +124,17 @@ class EditarTests(unittest.TestCase):
         for value in ("Outro animal doméstico", "Fêmea", "Médio", "Grussaí"):
             self.assertIn(f'selected value="{value}"', page.text)
         self.assertIn(f'action="{URL}"', page.text)
-        self.assertNotIn('type="file"', page.text)
-        self.assertNotIn("multipart/form-data", page.text)
+        self.assertIn('type="file"', page.text)
+        self.assertIn("multipart/form-data", page.text)
         self.assertIn(">Salvar alterações</button>", page.text)
         self.assertNotIn("Salvar como rascunho", page.text)
         self.assertNotIn("Publicar agora", page.text)
         self.assertNotIn('name="acao"', page.text)
-        query = self.calls[-1]
+        query = next(r for r in self.calls if r.url.path == "/rest/v1/animais")
         self.assertEqual(query.url.params["id"], "eq." + ANIMAL_ID)
         self.assertEqual(query.url.params["usuario_id"], "eq." + self.identity["id"])
         self.assertEqual(query.url.params["status_publicacao"], "eq.rascunho")
+        self.assertEqual(query.url.params["status_adocao"], "eq.disponivel")
         self.assertEqual(self.updates(), [])
 
     def test_update_allowlist_filters_jwt_and_confirmation(self):
@@ -125,14 +143,15 @@ class EditarTests(unittest.TestCase):
         response = self.client.post(URL, data=self.data(
             id="forged", usuario_id="forged", status_publicacao="publicado", status_adocao="adotado",
             oculto_admin="true", criado_em="forged", atualizado_em="forged",
-            foto=(BytesIO(b"not an image"), "foto.png"), animal_fotos="forged"))
+            animal_fotos="forged"))
         self.assertEqual(response.status_code, 302)
         self.assertEqual(response.location, "/minha-conta")
         self.assertEqual(response.headers["Cache-Control"], "no-store")
         self.assertEqual(len(self.updates()), 1)
         sent = self.updates()[0]
         self.assertEqual(dict(sent.url.params), dict(id="eq." + ANIMAL_ID,
-                         usuario_id="eq." + self.identity["id"], status_publicacao="eq.rascunho"))
+                         usuario_id="eq." + self.identity["id"], status_publicacao="eq.rascunho",
+                         status_adocao="eq.disponivel"))
         self.assertEqual(sent.headers["authorization"], f"Bearer {self.access}")
         self.assertEqual(sent.headers["apikey"], "sb_publishable_test")
         self.assertIn("return=representation", sent.headers["prefer"])
@@ -143,7 +162,7 @@ class EditarTests(unittest.TestCase):
         self.assertIn(SUCESSO, page.text)
         self.assertIn("Novo nome", page.text)
         self.assertNotIn(SUCESSO, self.client.get(response.location).text)
-        self.assertTrue(all(r.url.path in ("/rest/v1/animais", "/auth/v1/user") for r in self.calls))
+        self.assertTrue(all(r.url.path in ("/rest/v1/animais", "/rest/v1/animal_fotos", "/auth/v1/user") for r in self.calls))
         self.assertEqual(ANIMAIS, animals)
         self.assertEqual(self.client.get("/animais").text, catalog)
 
@@ -219,11 +238,100 @@ class EditarTests(unittest.TestCase):
             response = self.client.post(URL, data=dict(data, csrf_token=token))
             self.assertEqual(response.status_code, 400)
             self.assertIn("Recarregue", response.text)
-            self.assertIn('value="Novo nome"', response.text)
+            self.assertNotIn('type="submit"', response.text)
             self.assertNotIn('type="file"', response.text)
             self.assertEqual(response.headers["Cache-Control"], "no-store")
         with patch.dict(app.config, WTF_CSRF_TIME_LIMIT=-1):
             self.assertEqual(self.client.post(URL, data=data).status_code, 400)
+        self.assertEqual(self.updates(), [])
+
+    def photo(self):
+        image = BytesIO()
+        Image.new("RGB", (24, 16), "red").save(image, format="PNG")
+        image.seek(0)
+        return image, "foto.png"
+
+    def test_edit_with_first_photo_updates_before_upload_and_confirms(self):
+        page = self.client.post(URL, data=self.data(foto=self.photo()))
+        self.assertEqual(page.status_code, 302)
+        writes = [r for r in self.calls if r.method != "GET"]
+        self.assertEqual([r.url.path for r in writes], ["/rest/v1/animais", "/rest/v1/animal_fotos",
+            f'/storage/v1/object/animal-fotos/{self.identity["id"]}/{ANIMAL_ID}/{self.foto_id}.webp',
+            "/rest/v1/rpc/confirmar_foto"])
+        for req in writes:
+            self.assertEqual(req.headers["authorization"], "Bearer " + self.access)
+        self.assertIn("dados e a fotografia foram salvos", self.client.get(page.location).text)
+
+    def test_existing_reservations_preserve_photo_and_allow_data_only(self):
+        for state in ("pronta", "pendente", "removendo"):
+            with self.subTest(state=state):
+                self.reservas = [dict(id=self.foto_id, animal_id=ANIMAL_ID, posicao=1, estado=state)]
+                page = self.client.get(URL)
+                self.assertEqual(page.status_code, 200)
+                self.assertNotIn('type="file"', page.text)
+                self.assertEqual(f'src="/anuncios/{ANIMAL_ID}/miniatura"' in page.text, state == "pronta")
+                self.assertEqual(self.client.post(URL, data=self.data()).status_code, 302)
+                count = len(self.updates())
+                response = self.client.post(URL, data=self.data(foto=self.photo()))
+                self.assertEqual(response.status_code, 409)
+                self.assertEqual(len(self.updates()), count)
+        self.assertFalse(any(r.url.path.startswith("/storage/") for r in self.calls))
+
+    def test_reservation_lookup_failure_never_offers_upload_or_updates(self):
+        for failure in (503, "network"):
+            self.photo_stage, self.photo_failure = "consulta", failure
+            for page in (self.client.get(URL), self.client.post(URL, data=self.data(foto=self.photo()))):
+                self.assertEqual(page.status_code, 503)
+                self.assertNotIn('type="file"', page.text)
+        self.assertEqual(self.updates(), [])
+
+    def test_bad_and_multiple_files_never_update_or_upload(self):
+        for files in ((BytesIO(b"invalid"), "foto.png"), [self.photo(), self.photo()],
+                      (BytesIO(b""), "foto.png"), (BytesIO(b"x" * (3 * 1024 * 1024 + 1)), "foto.png")):
+            page = self.client.post(URL, data=self.data(foto=files))
+            self.addCleanup(page.request.environ["wsgi.input"].close)
+            self.assertEqual(page.status_code, 400)
+            self.assertIn('id="foto-erro"', page.text)
+            self.assertIn('value="Novo nome"', page.text)
+        for changes in (dict(outro_arquivo=self.photo()), dict(foto="fake-upload")):
+            self.assertEqual(self.client.post(URL, data=self.data(**changes)).status_code, 400)
+        self.assertEqual(self.updates(), [])
+        self.assertFalse(any(r.url.path.startswith("/storage/") for r in self.calls))
+
+    def test_invalid_fields_or_unconfirmed_update_never_start_photo_upload(self):
+        self.assertEqual(self.client.post(URL, data=self.data(nome="", foto=self.photo())).status_code, 400)
+        for result in ([], [dict(self.row, status_adocao="adotado")], None):
+            self.update_result = result
+            self.assertIn(self.client.post(URL, data=self.data(foto=self.photo())).status_code, (409, 503))
+        self.failure = "network"
+        self.assertEqual(self.client.post(URL, data=self.data(foto=self.photo())).status_code, 503)
+        self.assertFalse(any(r.method == "POST" and r.url.path == "/rest/v1/animal_fotos" for r in self.calls))
+
+    def test_partial_photo_failures_preserve_data_without_retry_or_compensation(self):
+        for stage in ("reserva", "upload", "confirmacao", "pronta"):
+            with self.subTest(stage=stage):
+                self.photo_stage, self.photo_failure = stage, "network"
+                self.calls.clear()
+                page = self.client.post(URL, data=self.data(foto=self.photo()))
+                self.assertEqual(page.status_code, 302)
+                self.assertEqual(self.row["nome"], "Novo nome")
+                text = self.client.get(page.location).text
+                self.assertIn("dados foram salvos, mas a fotografia não foi confirmada", text)
+                self.assertNotIn("dados e a fotografia foram salvos", text)
+                self.assertLessEqual(len([r for r in self.calls if r.method == "POST" and r.url.path.startswith("/storage/")]), 1)
+                self.assertFalse(any(r.method == "DELETE" for r in self.calls))
+
+    def test_adopted_draft_and_oversize_body_never_offer_upload(self):
+        self.row["status_adocao"] = "adotado"
+        for page in (self.client.get(URL), self.client.post(URL, data=self.data(foto=self.photo()))):
+            self.assertEqual(page.status_code, 404)
+        self.row["status_adocao"] = "disponivel"
+        page = self.client.post(URL, data=self.data(foto=(BytesIO(b"x" * (4 * 1024 * 1024)), "foto.png")))
+        self.addCleanup(page.request.environ["wsgi.input"].close)
+        self.assertEqual(page.status_code, 413)
+        self.assertIn("Editar rascunho", page.text)
+        self.assertNotIn('type="file"', page.text)
+        self.assertNotIn('action="/anunciar"', page.text)
         self.assertEqual(self.updates(), [])
 
     def test_api_failures_never_report_success_or_leak_secrets(self):

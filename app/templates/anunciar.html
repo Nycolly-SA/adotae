@@ -1,51 +1,101 @@
 {% extends "base.html" %}
 {% block title %}{{ 'Editar rascunho' if edicao else 'Anunciar animal' }} — Adotaê{% endblock %}
+{% macro campo(field, largo=false) %}
+<div class="registration-field{% if largo %} announcement-field-wide{% endif %}">
+    {{ field.label }}
+    {% set ajuda = field.name in ('especie_outro', 'whatsapp') %}
+    {{ field(aria_describedby=(field.name ~ '-ajuda ' if ajuda else '') ~ (field.name ~ '-erro' if field.errors else ''), aria_invalid='true' if field.errors else 'false') }}
+    {% if field.name == 'especie_outro' %}
+    <small id="especie_outro-ajuda">Preencha somente se selecionou “Outro animal doméstico”. Nesse caso, este campo é obrigatório.</small>
+    {% elif field.name == 'whatsapp' %}
+    <small id="whatsapp-ajuda">Use somente dígitos, de 8 a 15 caracteres, começando de 1 a 9. Inclua o código do país e o DDD quando aplicável, sem +, espaços ou pontuação. Exemplo: 5522999999999.</small>
+    {% endif %}
+    {% if field.errors %}<p id="{{ field.name }}-erro" class="field-error" role="alert">{{ field.errors | join(' ') }}</p>{% endif %}
+</div>
+{% endmacro %}
 {% block content %}
-<section class="container registration" aria-labelledby="anunciar-titulo">
-    <div class="registration-card">
+<section class="container announcement-page" aria-labelledby="anunciar-titulo">
+    <header class="announcement-heading">
         <p class="section-label">Um novo começo</p>
         <h1 id="anunciar-titulo">{{ 'Editar rascunho' if edicao else 'Anunciar animal' }}</h1>
         {% if edicao %}
-        <p>Atualize os dados do seu rascunho. As fotografias existentes serão preservadas.</p>
+        <p>Atualize os dados e, se ainda não houver fotografia, adicione a primeira foto. O anúncio continuará como rascunho.</p>
         {% else %}
         <p>Cadastre um animal doméstico de São João da Barra, RJ. Escolha salvar como rascunho ou publicar agora.</p>
         {% endif %}
-        {% if mensagem %}<p class="registration-message" role="alert">{{ mensagem }}</p>{% endif %}
-        {% if not indisponivel %}
-        <p>Os campos são obrigatórios, exceto os indicados como opcionais.{% if edicao %} Não é necessário informar contatos.{% else %} Para salvar como rascunho, contatos e fotografia são opcionais. Para publicar agora, informe pelo menos um contato válido (e-mail ou WhatsApp) e uma fotografia válida.{% endif %}</p>
-        <p>Os contatos que você escolher informar serão públicos quando o anúncio for publicado. Não informe seu endereço completo.</p>
-        <form method="post" action="{{ url_for('editar_anuncio', animal_id=animal_id) if edicao else url_for('anunciar') }}"{% if not edicao %} enctype="multipart/form-data"{% endif %}>
-            {{ form.csrf_token }}
-            {% for field in (form.nome, form.especie, form.especie_outro, form.sexo, form.idade_aproximada, form.porte, form.descricao, form.distrito, form.bairro, form.email_contato, form.whatsapp) %}
-            <div class="registration-field">
-                {{ field.label }}
-                {% set ajuda = field.name in ('especie_outro', 'whatsapp') %}
-                {{ field(aria_describedby=(field.name ~ '-ajuda ' if ajuda else '') ~ (field.name ~ '-erro' if field.errors else ''), aria_invalid='true' if field.errors else 'false') }}
-                {% if field.name == 'especie_outro' %}
-                <small id="especie_outro-ajuda">Preencha somente se selecionou “Outro animal doméstico”. Nesse caso, este campo é obrigatório.</small>
-                {% elif field.name == 'whatsapp' %}
-                <small id="whatsapp-ajuda">Use somente dígitos, de 8 a 15 caracteres, começando de 1 a 9. Inclua o código do país e o DDD quando aplicável, sem +, espaços ou pontuação. Exemplo: 5522999999999.</small>
-                {% endif %}
-                {% if field.errors %}<p id="{{ field.name }}-erro" class="field-error" role="alert">{{ field.errors | join(' ') }}</p>{% endif %}
+    </header>
+    {% if mensagem %}<p class="registration-message" role="alert">{{ mensagem }}</p>{% endif %}
+    {% if not indisponivel %}
+    <form class="announcement-form" method="post" action="{{ url_for('editar_anuncio', animal_id=animal_id) if edicao else url_for('anunciar') }}" enctype="multipart/form-data">
+        {{ form.csrf_token }}
+        <p class="announcement-instructions">Os campos são obrigatórios, exceto os indicados como opcionais.{% if edicao %} Não é necessário informar contatos.{% else %} Para salvar como rascunho, contatos e fotografia são opcionais. Para publicar agora, informe pelo menos um contato válido (e-mail ou WhatsApp) e uma fotografia válida.{% endif %}</p>
+        <fieldset class="announcement-section">
+            <legend>Sobre o animal</legend>
+            <div class="announcement-fields">
+                {{ campo(form.nome, true) }}
+                {{ campo(form.especie) }}
+                {{ campo(form.especie_outro) }}
+                {{ campo(form.sexo) }}
+                {{ campo(form.porte) }}
+                {{ campo(form.idade_aproximada) }}
+                {{ campo(form.descricao, true) }}
             </div>
-            {% endfor %}
-            {% if not edicao %}
+        </fieldset>
+        <fieldset class="announcement-section">
+            <legend>Localização</legend>
+            <p>São João da Barra, RJ. Não informe seu endereço completo.</p>
+            <div class="announcement-fields">
+                {{ campo(form.distrito) }}
+                {{ campo(form.bairro) }}
+            </div>
+        </fieldset>
+        <fieldset class="announcement-section">
+            <legend>Contatos</legend>
+            <p>Os contatos que você escolher informar serão públicos quando o anúncio for publicado.</p>
+            <div class="announcement-fields">
+                {{ campo(form.email_contato) }}
+                {{ campo(form.whatsapp) }}
+            </div>
+        </fieldset>
+        <fieldset class="announcement-section">
+            <legend>Fotografia</legend>
+            {% if not edicao or (reservas is defined and reservas == []) %}
             <div class="registration-field">
                 {{ form.foto.label }}
                 {{ form.foto(aria_describedby='foto-ajuda' ~ (' foto-erro' if form.foto.errors else ''), aria_invalid='true' if form.foto.errors else 'false') }}
                 <small id="foto-ajuda">Uma fotografia JPEG, PNG ou WebP, estática, de até 3 MiB. Após corrigir erros no formulário, selecione a fotografia novamente.</small>
-                {% if form.foto.errors %}<p id="foto-erro" class="field-error" role="alert">{{ form.foto.errors | join(' ') }}</p>{% endif %}
             </div>
+            {% elif reservas is defined and reservas %}
+                {% if reservas | selectattr('estado', 'equalto', 'pronta') | list %}
+                <div class="announcement-photo">
+                    <div class="account-thumbnail">
+                        <span class="account-thumbnail-placeholder" aria-hidden="true">Fotografia indisponível</span>
+                        <img src="{{ url_for('miniatura_propria', animal_id=animal_id) }}" alt="Fotografia de {{ form.nome.data }}" width="128" height="128" loading="lazy" decoding="async" referrerpolicy="no-referrer">
+                    </div>
+                    <p>A fotografia existente será preservada. Substituição e exclusão não estão disponíveis nesta etapa.</p>
+                </div>
+                {% endif %}
+                {% if reservas | selectattr('estado', 'equalto', 'pendente') | list %}
+                <p class="registration-message">Existe uma operação de fotografia pendente. A recuperação ainda não está disponível; não envie outra foto.</p>
+                {% endif %}
+                {% if reservas | selectattr('estado', 'equalto', 'removendo') | list %}
+                <p class="registration-message">Existe uma fotografia em remoção. A posição continua ocupada; não envie outra foto.</p>
+                {% endif %}
+            {% else %}
+            <p>Recarregue a edição para consultar a situação da fotografia antes de enviar.</p>
             {% endif %}
+            {% if form.foto.errors %}<p id="foto-erro" class="field-error" role="alert">{{ form.foto.errors | join(' ') }}</p>{% endif %}
+        </fieldset>
+        <div class="announcement-actions">
             {% if edicao %}
             <button class="button" type="submit">Salvar alterações</button>
             {% else %}
-            <button class="button" type="submit" name="acao" value="rascunho">Salvar como rascunho</button>
+            <button class="button announcement-button-secondary" type="submit" name="acao" value="rascunho">Salvar como rascunho</button>
             <button class="button" type="submit" name="acao" value="publicar">Publicar agora</button>
             {% endif %}
-        </form>
-        {% endif %}
-        <p><a class="text-link" href="{{ url_for('minha_conta') }}">Voltar à minha conta</a></p>
-    </div>
+        </div>
+    </form>
+    {% endif %}
+    <a class="text-link announcement-back" href="{{ url_for('minha_conta') }}">Voltar à minha conta</a>
 </section>
 {% endblock %}

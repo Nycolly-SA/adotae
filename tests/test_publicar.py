@@ -106,8 +106,8 @@ class PublicarTests(unittest.TestCase):
         self.assertIn(f'method="post" action="{URL}"', page.text)
         self.assertIn('>Publicar</button>', page.text)
         self.assertIn("pelo menos um contato e uma fotografia pronta", page.text)
-        for action in ("editar", "foto"):
-            self.assertIn(f'href="/anuncios/{ANIMAL_ID}/{action}"', page.text)
+        self.assertIn(f'href="/anuncios/{ANIMAL_ID}/editar"', page.text)
+        self.assertNotIn(f'href="/anuncios/{ANIMAL_ID}/foto"', page.text)
         self.row["status_publicacao"] = "publicado"
         self.assertNotIn(f'action="{URL}"', self.client.get("/minha-conta").text)
 

@@ -131,11 +131,17 @@ class AdicionarFotoTests(unittest.TestCase):
         self.assertNotIn("estado", fotos.url.params)
         self.assertEqual(self.writes(), [])
 
-    def test_account_links_only_drafts_without_photo_queries(self):
-        self.assertIn(f'href="{URL}"', self.client.get("/minha-conta").text)
+    def test_account_has_no_separate_photo_link_or_photo_queries(self):
+        self.assertNotIn(f'href="{URL}"', self.client.get("/minha-conta").text)
         self.animal["status_publicacao"] = "publicado"
         self.assertNotIn(f'href="{URL}"', self.client.get("/minha-conta").text)
         self.assertFalse(any(r.url.path.endswith("animal_fotos") for r in self.calls))
+
+    def test_adopted_draft_cannot_receive_photo(self):
+        self.animal["status_adocao"] = "adotado"
+        for page in (self.client.get(URL), self.post()):
+            self.assertEqual(page.status_code, 404)
+        self.assertEqual(self.writes(), [])
 
     def test_anonymous_and_unconfirmed_blocked(self):
         visitor = app.test_client()
