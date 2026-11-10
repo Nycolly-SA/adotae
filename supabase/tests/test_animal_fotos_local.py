@@ -126,11 +126,20 @@ class FotosSQLLocal(unittest.TestCase):
         cls.fotos_before = cls.fotos_metadata()
         cls.execute((ROOT / "supabase/migrations/202611080001_protect_animais_edicao.sql").read_text(encoding="utf-8"))
         cls.execute((ROOT / "supabase/migrations/202611080002_publicar_anuncio.sql").read_text(encoding="utf-8"))
+        if cls.fotos_before != cls.fotos_metadata():
+            raise AssertionError('Publicação alterou metadados/permissões das fotografias')
+        cls.execute((ROOT / "supabase/migrations/202611080003_fotos_publicas_assinatura.sql").read_text(encoding="utf-8"))
+        cls.storage_before = cls.storage_policy_metadata()
+        cls.fotos_before = cls.fotos_metadata()
 
     @classmethod
     def fotos_metadata(cls):
         return cls.execute("""select jsonb_build_object(
-        'tabela',(select to_jsonb(c) from pg_class c where oid='public.animal_fotos'::regclass),
+        -- Estatísticas/manutenção física podem mudar por autovacuum entre casos;
+        -- não representam alteração de schema, permissões ou políticas.
+        'tabela',(select to_jsonb(c)-array['relpages','reltuples','relallvisible',
+            'relallfrozen','relfrozenxid','relminmxid'] from pg_class c
+            where oid='public.animal_fotos'::regclass),
         'colunas',(select jsonb_agg(to_jsonb(a) order by attnum) from pg_attribute a
             where attrelid='public.animal_fotos'::regclass),
         'politicas',(select jsonb_agg(to_jsonb(p) order by schemaname,tablename,policyname)

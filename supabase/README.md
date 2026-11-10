@@ -1,5 +1,91 @@
 # Banco de dados — etapa SQL
 
+## Assinatura pública individual de fotografias — validada em adotae-testes
+
+A migração [202611080003_fotos_publicas_assinatura.sql](migrations/202611080003_fotos_publicas_assinatura.sql)
+requer todas as anteriores. Mantém o bucket `animal-fotos` privado e não altera
+grants globais de Storage, funções privilegiadas, interface ou operações do dono.
+Foi validada no serviço Storage real do Supabase **adotae-testes em 09/11/2026**,
+conforme os resultados informados da execução. **O ambiente principal ainda não
+recebeu validação desta funcionalidade.**
+
+Para `anon`, concede somente SELECT de `id`, `animal_id` e `estado` em
+`animal_fotos`. `id`/`animal_id` identificam a reserva e compõem o caminho com
+`animais.usuario_id`, já legível nas linhas públicas; `estado` é necessário ao
+predicado invoker de Storage. Não concede SELECT de tabela, posição ou data.
+Na Data API, usar seleção explícita dessas colunas; `select=*` continua recusado.
+A RLS permissiva permite somente reservas `pronta` de anúncios `publicado`,
+`disponivel`, com `oculto_admin=false`; uma RLS restritiva repete a fronteira para
+impedir desvios por políticas permissivas adicionais, inclusive em `animais`.
+Os metadados de uma reserva pública podem ser localizados mesmo se o objeto
+estiver ausente/divergente; nesse caso a assinatura é recusada. Reservas privadas,
+pendentes e em remoção não aparecem para visitantes.
+
+No Storage, a base nova concede SELECT apenas nesse bucket. O guarda restritivo
+de SELECT para `anon` aceita exclusivamente `object.sign` e exige os estados
+acima, `owner_id=animais.usuario_id::text` e caminho exato
+`<usuario_id>/<animal_id>/<foto_id>.webp`. O guarda de papéis admite leitura anon,
+mas mantém seu WITH CHECK exclusivo do proprietário autenticado; novos guardas
+restritivos barram UPDATE (origem e destino) e DELETE anônimos. Assim, outra
+política permissiva não libera escrita, exclusão, listagem, download autenticado,
+assinatura em lote, assinatura de upload ou cópia. Os guardas são neutros para
+outros buckets, sem lhes conceder acesso. As políticas do proprietário permanecem
+iguais. Não há uso de `service_role` no novo fluxo.
+
+Os [testes locais](tests/test_fotos_publicas_local.py) executam consultas e DML
+reais sob RLS no PostgreSQL descartável, além das regressões anteriores. O
+[roteiro existente](tests/animal_fotos_rls.sql) passa a documentar a exceção por
+coluna, preservando a recusa de SELECT total. Executar os comandos locais já
+documentados abaixo. O stub usa helpers e metadados simulados: não emite URLs,
+não valida PostgREST/HTTP, bytes, cache ou a versão instalada do serviço.
+
+Validação local informada anteriormente: **58 testes SQL locais** e
+**232 testes Python** aprovados. Esses resultados são distintos do diagnóstico
+remoto abaixo; as suítes locais não foram reexecutadas nesta atualização documental.
+
+Na validação remota em **adotae-testes em 09/11/2026**, foram informados os
+seguintes resultados:
+
+- Cliente anônimo, sem sessão autenticada, consultou uma reserva `pronta` de
+  anúncio público, apenas com as colunas autorizadas.
+- A URL assinada de **60 segundos** foi gerada com sucesso; seu download retornou
+  **HTTP 200** e WebP válido.
+- O download direto anônimo foi bloqueado. As listagens anônimas do bucket e dos
+  prefixos testados não expuseram arquivos.
+- A assinatura de fotografia `pronta` pertencente a rascunho foi recusada, e a
+  reserva privada não ficou visível para visitante.
+- `select=*` foi recusado com `42501`.
+- O download autenticado pelo proprietário foi preservado.
+
+Esse diagnóstico remoto foi funcional e pontual, não uma reexecução dos
+58 testes SQL locais ou dos 232 testes Python. Cenários remotos de anúncios
+adotados, ocultos e fotografias em outros estados **não foram confirmados neste
+diagnóstico**.
+
+Antes de aplicar em outro ambiente remoto, revisar o diff e confirmar que o bucket
+continua privado e que o servidor oferece os
+[helpers de operação](https://supabase.com/docs/guides/storage/schema/helper-functions).
+Para ampliar a validação em ambiente de testes autorizado, verificar pela API,
+com chave pública/anon e
+sessões de dois proprietários: assinatura individual pública e acesso à URL;
+recusa para cada estado privado e vínculo inválido; listagem, download direto,
+assinatura em lote/upload, escrita, copy/move; upload/download do dono e isolamento
+do outro usuário; seleção explícita na Data API sem reservas privadas e recusa
+de `select=*`. Preparar arquivos exclusivamente pela API Storage, nunca por DML
+em `storage.objects`. Verificar os identificadores de operação efetivamente
+usados pelo servidor conforme o [controle de acesso](https://supabase.com/docs/guides/storage/security/access-control).
+`storage.operation` é contexto confiável do serviço, não prova de origem para
+clientes com acesso SQL arbitrário.
+
+Na integração futura, o Flask poderá solicitar URLs com `expiresIn=60`
+(60 segundos). Esse prazo será uma escolha da aplicação: `expiresIn` é definido
+por quem solicita a URL, e a RLS atual não estabelece um prazo máximo. Visitantes
+podem chamar a API diretamente e solicitar outros prazos aceitos pelo Storage.
+Ocultar um anúncio impede novas assinaturas, mas não revoga URLs existentes,
+que podem continuar utilizáveis até sua expiração. Cache também pode prolongar
+o acesso a respostas anteriores. Essa limitação é aceita conscientemente para
+o MVP acadêmico, sem garantia de revogação imediata.
+
 ## Publicação direta — validada em adotae-testes
 
 A migração [202611080002_publicar_anuncio.sql](migrations/202611080002_publicar_anuncio.sql)

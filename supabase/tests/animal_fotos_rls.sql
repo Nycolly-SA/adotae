@@ -1,6 +1,7 @@
 -- PENDENTE no Supabase. Executar somente após revisão/autorização, em ambiente
 -- descartável, na mesma conexão privilegiada, com as migrações de animais,
--- fotografias, correção de leitura e 202611080002_publicar_anuncio.sql aplicadas.
+-- fotografias, correção de leitura, 202611080002_publicar_anuncio.sql e
+-- 202611080003_fotos_publicas_assinatura.sql aplicadas.
 -- Como animais_rls.sql: BEGIN, fixtures, SET LOCAL ROLE/claims e ROLLBACK.
 -- Este roteiro acrescenta asserções: qualquer divergência gera erro; interromper
 -- e executar ROLLBACK. Não executar com service_role como se fosse cliente.
@@ -45,7 +46,11 @@ select pg_temp.fotos_assert(not has_table_privilege('anon', 'public.animal_fotos
 from unnest(array['SELECT','INSERT','UPDATE','DELETE','TRUNCATE','REFERENCES','TRIGGER']) p;
 select pg_temp.fotos_assert(not has_any_column_privilege('anon', 'public.animal_fotos', p),
                            'anon sem privilégios de coluna: ' || p)
-from unnest(array['SELECT','INSERT','UPDATE','REFERENCES']) p;
+from unnest(array['INSERT','UPDATE','REFERENCES']) p;
+-- Exceção necessária: apenas metadados usados pela assinatura pública.
+select pg_temp.fotos_assert(has_column_privilege('anon','public.animal_fotos',c,'SELECT')
+    = (c in ('id','animal_id','estado')), 'SELECT mínimo: ' || c)
+from unnest(array['id','animal_id','estado','posicao','criado_em']) c;
 select pg_temp.fotos_assert(
     has_table_privilege('authenticated', 'public.animal_fotos', 'SELECT')
     and not has_table_privilege('authenticated', 'public.animal_fotos', 'INSERT')
@@ -135,11 +140,13 @@ update public.animal_fotos set estado = 'pronta' where animal_id in (
 select set_config('adotae.foto_pronta_a', id::text, true)
 from public.animal_fotos where animal_id = current_setting('adotae.foto_publico_a')::uuid;
 
--- Visitante: nem fotografias de animais públicos são acessíveis.
+-- Visitante: somente IDs/estado de prontas públicas; SELECT * segue proibido.
 set local role anon;
 select set_config('request.jwt.claim.sub', '', true);
 select set_config('request.jwt.claims', '{"role":"anon"}', true);
 select pg_temp.fotos_erro('select * from public.animal_fotos', '42501');
+select pg_temp.fotos_assert((select count(*) = 2 from public.animal_fotos),
+    'somente as duas reservas prontas públicas');
 select pg_temp.fotos_erro('insert into public.animal_fotos (animal_id,posicao) values (gen_random_uuid(),1)', '42501');
 select pg_temp.fotos_erro('update public.animal_fotos set estado = ''removendo''', '42501');
 select pg_temp.fotos_erro('delete from public.animal_fotos', '42501');
@@ -371,12 +378,13 @@ select pg_temp.fotos_erro(format('insert into public.animal_fotos (animal_id,pos
     current_setting('adotae.foto_animal_a')), '42501');
 reset role;
 set local role anon;
+-- O helper avalia WITH CHECK quando presente: escrita continua bloqueada.
 select pg_temp.fotos_assert(not pg_temp.fotos_storage('animal_fotos_storage_papeis',
-    current_setting('adotae.foto_caminho_pronta')), 'anon sem Storage');
+    current_setting('adotae.foto_caminho_pronta')), 'anon sem WITH CHECK para escrita');
 select pg_temp.fotos_assert(pg_temp.fotos_storage('animal_fotos_storage_papeis',
     'arquivo.webp', 'outro-bucket'), 'guarda neutro para outro bucket');
 -- Regressão: mesmo com uma política permissiva ampla, anon consulta outro bucket
--- sem ganhar acesso às fotos e sem exigir SELECT em public.animal_fotos.
+-- sem ganhar acesso às fotos fora da assinatura individual de prontas públicas.
 reset role;
 create policy teste_fotos_outro_bucket on storage.objects for select to anon using (true);
 set local role anon;
