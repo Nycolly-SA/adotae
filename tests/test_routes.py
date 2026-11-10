@@ -60,6 +60,12 @@ class RouteTests(unittest.TestCase):
         self.payload = None
         self.override_payload = False
         self.rows = []
+        self.photos = []
+        self.photo_failure = None
+        self.sign_payload = None
+        self.sign_failure = set()
+        self.sign_network_failure = False
+        self.reservation_payload = None
         for index, (nome, especie, sexo, idade, porte, distrito) in enumerate((
             ("Bento", "Cachorro", "Macho", "2 anos", "Médio", "São João da Barra (sede)"),
             ("Luna", "Gato", "Fêmea", "1 ano", "Pequeno", "Atafona"),
@@ -77,6 +83,24 @@ class RouteTests(unittest.TestCase):
             self.calls.append(request)
             if request.url.path.endswith("/user"):
                 return httpx.Response(200, json=user())
+            if request.url.path == "/rest/v1/animal_fotos":
+                if self.reservation_payload is not None:
+                    return httpx.Response(200, json=self.reservation_payload)
+                if self.photo_failure == "network":
+                    raise httpx.ConnectError("private photo failure")
+                if self.photo_failure:
+                    return httpx.Response(403, json=dict(message="private photo failure"))
+                ids = request.url.params["animal_id"][4:-1].split(",")
+                return httpx.Response(200, json=[p for p in self.photos if not isinstance(p, dict)
+                    or p.get("animal_id") in ids])
+            if request.url.path.startswith("/storage/v1/object/sign/animal-fotos/"):
+                if self.sign_network_failure:
+                    raise httpx.ConnectError("private failure ?token=secret")
+                if any(photo in request.url.path for photo in self.sign_failure):
+                    return httpx.Response(403, json=dict(message="private sign failure"))
+                path = request.url.path.removeprefix("/storage/v1")
+                return httpx.Response(200, json=self.sign_payload if self.sign_payload is not None
+                                      else dict(signedURL=path + "?token=signature.test"))
             self.assertEqual(request.url.path, "/rest/v1/animais")
             self.assertEqual(request.method, "GET")
             if self.failure == "network":
@@ -308,12 +332,12 @@ class RouteTests(unittest.TestCase):
         html, _ = self.assert_catalog({}, ("Bento", "Luna", "Paçoca", "Amora"))
         call = self.catalog_calls()[-1]
         self.assertEqual(dict(call.url.params), dict(
-            select="id,nome,especie,sexo,idade_aproximada,porte,descricao,distrito",
+            select="id,nome,especie,sexo,idade_aproximada,porte,descricao,distrito,usuario_id",
             status_publicacao="eq.publicado", status_adocao="eq.disponivel",
             oculto_admin="eq.false", order="criado_em.desc"))
         self.assertEqual(call.headers["apikey"], "sb_publishable_test")
         self.assertEqual(call.headers["authorization"], "Bearer sb_publishable_test")
-        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(len(self.catalog_calls()), 1)
         self.assertEqual(sorted((html.index(f">{name}</h2>"), name) for name in
                               ("Bento", "Luna", "Paçoca", "Amora")),
                          [(html.index(f">{name}</h2>"), name) for name in
@@ -409,6 +433,164 @@ class RouteTests(unittest.TestCase):
                       "whatsapp", "sb_publishable_test"):
             self.assertNotIn(value, response.text)
 
+
+    def photo(self, animal=0, number=1, **changes):
+        return dict(dict(id=f"10000000-0000-0000-0000-{number:012d}",
+                         animal_id=self.rows[animal]["id"], estado="pronta"), **changes)
+
+    def photo_calls(self):
+        return [r for r in self.calls if r.url.path == "/rest/v1/animal_fotos"]
+
+    def sign_calls(self):
+        return [r for r in self.calls if r.url.path.startswith("/storage/")]
+
+    def test_catalog_valid_photo_uses_real_ids_and_individual_anonymous_signing(self):
+        self.photos = [self.photo()]
+        for logged_in in (False, True):
+            with self.subTest(logged_in=logged_in):
+                if logged_in:
+                    self.client.set_cookie("adotae_access", jwt())
+                    self.client.set_cookie("adotae_refresh", "private-refresh")
+                self.calls.clear()
+                response = self.client.get("/animais")
+                page = PageParser()
+                page.feed(response.text)
+                self.assertEqual(len(page.images), 1)
+                path = f'{user()["id"]}/{self.rows[0]["id"]}/{self.photos[0]["id"]}.webp'
+                self.assertEqual(page.images[0]["src"],
+                    "https://example.supabase.co/storage/v1/object/sign/animal-fotos/" + path + "?token=signature.test")
+                self.assertEqual(page.images[0]["alt"], "Fotografia de Bento")
+                self.assertEqual(page.images[0]["referrerpolicy"], "no-referrer")
+                self.assertEqual(response.headers["Cache-Control"], "no-store")
+                self.assertEqual(response.headers["Referrer-Policy"], "no-referrer")
+                self.assertEqual(response.text.count("Fotografia temporariamente indisponível"), 3)
+                self.assertEqual(len(self.sign_calls()), 1)
+                sign = self.sign_calls()[0]
+                self.assertEqual(sign.method, "POST")
+                self.assertEqual(json.loads(sign.content), {"expiresIn": "60"})
+                self.assertEqual(len(self.photo_calls()), 1)
+                params = self.photo_calls()[0].url.params
+                self.assertEqual(params["select"], "id,animal_id,estado")
+                self.assertEqual(params["estado"], "eq.pronta")
+                self.assertEqual(params["animal_id"], "in.(" + ",".join(r["id"] for r in self.rows) + ")")
+                for call in self.calls:
+                    if not call.url.path.endswith("/user"):
+                        self.assertEqual(call.headers["authorization"], "Bearer sb_publishable_test")
+                        self.assertEqual(call.headers["apikey"], "sb_publishable_test")
+                        self.assertTrue(call.method == "GET" or call in self.sign_calls())
+                for private in ("usuario_id", "email_contato", "private-contact", "private-refresh", jwt(), "sb_publishable_test"):
+                    self.assertNotIn(private, response.text)
+                # Owner UUID is necessarily in the signed object path, never a template field.
+                with patch("run.render_template", wraps=__import__("run").render_template) as render:
+                    self.client.get("/animais")
+                    self.assertTrue(all("usuario_id" not in a for a in render.call_args.kwargs["animais"]))
+
+    def test_catalog_photo_selection_is_deterministic_and_failures_are_isolated(self):
+        self.photos = [self.photo(0, 9), self.photo(1, 4), self.photo(0, 2)]
+        for reverse in (False, True):
+            if reverse:
+                self.photos.reverse()
+            self.calls.clear()
+            self.sign_failure = {self.photo(0, 2)["id"]}
+            response = self.client.get("/animais")
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.text.count("Fotografia temporariamente indisponível"), 3)
+            self.assertIn(self.photo(1, 4)["id"], response.text)
+            self.assertEqual(len(self.photo_calls()), 1)
+            self.assertEqual(len(self.sign_calls()), 2)
+            self.assertFalse(any(self.photo(0, 9)["id"] in str(r.url) for r in self.sign_calls()))
+
+    def test_catalog_reservation_failures_keep_animals(self):
+        for failure in (403, "network"):
+            self.photo_failure = failure
+            response = self.client.get("/animais")
+            self.assertEqual(response.status_code, 200)
+            self.assertIn("4 animais encontrados", response.text)
+            self.assertEqual(response.text.count("Fotografia temporariamente indisponível"), 4)
+            self.assertNotIn("private", response.text)
+            self.assertEqual(self.sign_calls(), [])
+
+    def test_catalog_invalid_reservations_and_owner_are_ignored(self):
+        for photo in (None, {}, self.photo(id="invalid"), self.photo(estado="pendente"),
+                      self.photo(animal_id="invalid")):
+            self.photos = [photo, self.photo(1, 2)]
+            response = self.client.get("/animais")
+            self.assertEqual(response.status_code, 200)
+            self.assertIn(self.photo(1, 2)["id"], response.text)
+        self.photos = [self.photo()]
+        for owner in (None, "invalid", 123):
+            self.rows[0]["usuario_id"] = owner
+            self.assertEqual(self.client.get("/animais").text.count("Fotografia temporariamente indisponível"), 4)
+
+    def test_catalog_rejects_invalid_signatures_and_unexpected_urls(self):
+        self.photos = [self.photo()]
+        path = f'/object/sign/animal-fotos/{user()["id"]}/{self.rows[0]["id"]}/{self.photos[0]["id"]}.webp'
+        for payload in ({}, {"signedURL": None}, {"signedURL": 123}, [],
+                        *({"signedURL": url} for url in (
+                            "/https://evil.example/image?token=secret", "/javascript:alert(1)",
+                            path, path + "?token=", path + "?token=x&extra=1",
+                            path + "?token=x#fragment", path.replace(".webp", ".jpg") + "?token=x",
+                            "/object/public/animal-fotos/image?token=x",
+                            "//evil.example/image?token=x",
+                            "/https://example.supabase.co.evil.example" + path + "?token=x",
+                            "/https://user:pass@example.supabase.co" + path + "?token=x",
+                            "/http://example.supabase.co" + path + "?token=x",
+                            path + "?token=x&token=y", path + "?token=x%0d%0a",
+                            path.replace(self.photos[0]["id"], self.photo(0, 2)["id"]) + "?token=x"))):
+            with self.subTest(payload=payload):
+                self.sign_payload = payload
+                response = self.client.get("/animais")
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.text.count("Fotografia temporariamente indisponível"), 4)
+                self.assertNotIn("evil.example", response.text)
+
+    def test_catalog_photo_filters_empty_results_and_layout(self):
+        self.photos = [self.photo(i, i + 1) for i in range(4)]
+        html, page = self.assert_catalog({"tipo": "Gato", "distrito": "Atafona"}, ("Luna",))
+        self.assertEqual(len(page.images), 1)
+        self.assertEqual(self.photo_calls()[-1].url.params["animal_id"], f'in.({self.rows[1]["id"]})')
+        self.assertIn(f'/animais/{self.rows[1]["id"]}', page.links)
+        self.assertIn('class="card-image"', html)
+        self.calls.clear()
+        self.assert_catalog({"porte": "Grande"}, ())
+        self.assertEqual(self.photo_calls(), [])
+        self.assertEqual(self.sign_calls(), [])
+
+    def test_catalog_malformed_reservation_responses_keep_fallback(self):
+        for payload in ({}, "private", 42):
+            self.reservation_payload = payload
+            response = self.client.get("/animais")
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.text.count("Fotografia temporariamente indisponível"), 4)
+            self.assertEqual(self.sign_calls(), [])
+
+    def test_catalog_multiple_photos_preserve_layout_and_escape_alt_text(self):
+        self.rows[0]["nome"] = '<Bento "amigo">'
+        self.photos = [self.photo(0, 9), self.photo(1, 3), self.photo(0, 2)]
+        for _ in range(2):
+            response = self.client.get("/animais")
+            page = PageParser()
+            page.feed(response.text)
+            self.assertEqual(len(page.images), 2)
+            self.assertIn(self.photo(0, 2)["id"], page.images[0]["src"])
+            self.assertIn(self.photo(1, 3)["id"], page.images[1]["src"])
+            self.assertEqual(page.images[0]["alt"], 'Fotografia de <Bento "amigo">')
+            self.assertNotIn('<Bento "amigo">', response.text)
+            self.assertIn("4 animais encontrados", response.text)
+            self.assertEqual(response.text.count('class="animal-card"'), 4)
+            self.photos.reverse()
+
+    def test_catalog_signed_urls_and_failures_are_not_logged(self):
+        self.photos = [self.photo()]
+        for network_failure in (False, True):
+            self.sign_network_failure = network_failure
+            with self.assertLogs("httpx", level="INFO") as logs:
+                response = self.client.get("/animais")
+            self.assertEqual(response.status_code, 200)
+            self.assertNotIn("token=", "\n".join(logs.output))
+            self.assertNotIn("signature.test", "\n".join(logs.output))
+            if network_failure:
+                self.assertEqual(response.text.count("Fotografia temporariamente indisponível"), 4)
 
 if __name__ == "__main__":
     unittest.main()

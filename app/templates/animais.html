@@ -37,8 +37,12 @@
     <div class="animal-grid">
         {% for animal in animais %}
         <article class="animal-card" aria-labelledby="animal-{{ animal.id }}">
-            <div class="card-image card-image-unavailable">
+            <div class="card-image{% if not animal.foto_url %} card-image-unavailable{% endif %}">
+                {% if animal.foto_url %}
+                <img src="{{ animal.foto_url }}" alt="Fotografia de {{ animal.nome }}" referrerpolicy="no-referrer">
+                {% else %}
                 <p>Fotografia temporariamente indisponível</p>
+                {% endif %}
                 <span class="species-tag">{{ animal.especie }}</span>
             </div>
             <div class="card-body">

@@ -4,7 +4,7 @@ import os
 import re
 from pathlib import Path
 from typing import cast
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 from uuid import UUID
 
 from dotenv import load_dotenv
@@ -535,7 +535,7 @@ def animais():
         # permite ler rascunhos, mas o catálogo deve ter sempre acesso anônimo.
         cliente = novo_cliente()
         consulta = (cliente.table("animais")
-                    .select("id,nome,especie,sexo,idade_aproximada,porte,descricao,distrito")
+                    .select("id,nome,especie,sexo,idade_aproximada,porte,descricao,distrito,usuario_id")
                     .eq("status_publicacao", "publicado")
                     .eq("status_adocao", "disponivel").eq("oculto_admin", False))
         for parametro, coluna in (("tipo", "especie"), ("porte", "porte"), ("distrito", "distrito")):
@@ -545,7 +545,68 @@ def animais():
         animais_publicos = validar_catalogo(registros)
     except (APIError, HTTPError, SupabaseException, ValueError, TypeError):
         return render_template("animais.html", **contexto, indisponivel=True), 503
+    adicionar_fotos_catalogo(cliente, registros, animais_publicos)
     return render_template("animais.html", **contexto, animais=animais_publicos)
+
+
+def adicionar_fotos_catalogo(cliente, registros, animais):
+    """Consulta reservas em conjunto; falhas de fotos preservam o catálogo."""
+    if not animais:
+        return
+    try:
+        reservas = (cliente.table("animal_fotos").select("id,animal_id,estado")
+                    .in_("animal_id", [animal["id"] for animal in animais])
+                    .eq("estado", "pronta").execute().data)
+        if not isinstance(reservas, list):
+            return
+    except (APIError, HTTPError, SupabaseException, ValueError, TypeError):
+        return
+
+    escolhidas = {}
+    ids = {str(UUID(animal["id"])) for animal in animais}
+    for reserva in reservas:
+        try:
+            if not isinstance(reserva, dict) or reserva.get("estado") != "pronta":
+                continue
+            animal_id = str(UUID(reserva["animal_id"]))
+            foto_id = str(UUID(reserva["id"]))
+            if animal_id in ids and (animal_id not in escolhidas or foto_id < escolhidas[animal_id]):
+                escolhidas[animal_id] = foto_id
+        except (ValueError, TypeError, KeyError, AttributeError):
+            continue
+
+    for registro, animal in zip(registros, animais):
+        try:
+            animal_id = str(UUID(animal["id"]))
+            if animal_id not in escolhidas:
+                continue
+            dono_id = str(UUID(registro["usuario_id"]))
+            caminho = f"{dono_id}/{animal_id}/{escolhidas[animal_id]}.webp"
+            resposta = cliente.storage.from_("animal-fotos").create_signed_url(caminho, 60)
+            url = validar_url_foto(resposta, caminho)
+            if url:
+                animal["foto_url"] = url
+        except (APIError, HTTPError, StorageApiError, SupabaseException,
+                ValueError, TypeError, KeyError, AttributeError):
+            # Não registrar a resposta ou exceção: podem conter a URL assinada.
+            continue
+
+
+def validar_url_foto(resposta, caminho):
+    if not isinstance(resposta, dict):
+        return None
+    url = resposta.get("signedURL")
+    if not isinstance(url, str) or any(ord(c) <= 32 or ord(c) == 127 for c in url):
+        return None
+    origem = urlsplit(app.config["SUPABASE_URL"])
+    partes = urlsplit(url)
+    esperado = origem.path.rstrip("/") + "/storage/v1/object/sign/animal-fotos/" + caminho
+    if (partes.scheme != "https" or partes.scheme != origem.scheme
+            or partes.netloc != origem.netloc or partes.username or partes.password
+            or partes.path != esperado or partes.fragment
+            or not re.fullmatch(r"token=[A-Za-z0-9._~-]+", partes.query)):
+        return None
+    return url
 
 
 def validar_catalogo(registros):
