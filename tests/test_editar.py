@@ -118,6 +118,16 @@ class EditarTests(unittest.TestCase):
         page = self.client.get(URL)
         self.assertEqual(page.status_code, 200)
         self.assertEqual(page.headers["Cache-Control"], "no-store")
+        self.assertIn('Campos com * são obrigatórios.', page.text)
+        self.assertNotIn('especie_outro-ajuda', page.text)
+        self.assertIn('Para publicar, informe pelo menos um contato: e-mail ou WhatsApp.', page.text)
+        self.assertIn('Para publicar, adicione uma fotografia.', page.text)
+        self.assertNotIn('O complemento da espécie', page.text)
+        self.assertNotIn('class="announcement-errors"', page.text)
+        for field in ('nome', 'especie', 'sexo', 'porte', 'idade_aproximada', 'descricao', 'distrito', 'especie_outro'):
+            self.assertRegex(page.text, rf'<label for="{field}">[^<]+ <span[^>]*>\*</span></label>')
+        for prompt in ('a espécie', 'o sexo', 'o porte', 'o distrito'):
+            self.assertIn(f'value="">Selecione {prompt}</option>', page.text)
         for value in ("Fubá", "Porco doméstico", "2 anos", "Amigável.", "Centro",
                       "ana@example.com", "5522999999999"):
             self.assertIn(value, page.text)
@@ -213,7 +223,7 @@ class EditarTests(unittest.TestCase):
                     for value in ("", "x" * 61)]
         changes += [{field: value} for field, value in (("especie", "Silvestre"), ("sexo", "Outro"),
                     ("porte", "Gigante"), ("distrito", "Outra cidade"), ("email_contato", "invalido"),
-                    ("whatsapp", "+5522999999999"), ("whatsapp", "1234567"))]
+                    ("whatsapp", "5522telefone"), ("whatsapp", "1234567"))]
         for change in changes:
             with self.subTest(change=change):
                 page = self.client.post(URL, data=dict(data, **change))
@@ -230,6 +240,11 @@ class EditarTests(unittest.TestCase):
         self.assertEqual(sent["especie_outro"], "Porco doméstico")
         self.assertIsNone(sent["email_contato"])
         self.assertIsNone(sent["whatsapp"])
+
+    def test_formatted_whatsapp_is_normalized_before_update(self):
+        response = self.client.post(URL, data=self.data(whatsapp='+55 (22) 99999-9999'))
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(json.loads(self.updates()[-1].content)['whatsapp'], '5522999999999')
 
     def test_csrf_missing_invalid_foreign_and_expired(self):
         data = self.data()

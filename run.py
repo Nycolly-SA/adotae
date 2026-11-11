@@ -626,9 +626,10 @@ def anunciar():
         return render_template("anunciar.html", form=form,
                                mensagem="Escolha Salvar como rascunho ou Publicar agora."), 400
     publicar = acoes == ["publicar"]
+    valido = True
     if publicar and not (form.email_contato.data or form.whatsapp.data):
-        form.email_contato.errors.append("Para publicar, informe pelo menos um contato válido: e-mail ou WhatsApp.")
-        return render_template("anunciar.html", form=form), 400
+        form.contato_ausente = True
+        valido = False
     foto = None
     try:
         arquivos = request.files.getlist("foto")
@@ -640,6 +641,8 @@ def anunciar():
             foto = processar_foto(form.foto.data)
     except FotoInvalida as erro:
         form.foto.errors.append(str(erro))
+        valido = False
+    if not valido:
         return render_template("anunciar.html", form=form), 400
     mensagem = ("Não foi possível confirmar a criação do rascunho. Confira ‘Meus anúncios’ "
                 "na sua conta antes de cadastrar outro animal. Não reenvie este formulário, "

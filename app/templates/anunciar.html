@@ -2,14 +2,9 @@
 {% block title %}{{ 'Editar rascunho' if edicao else 'Anunciar animal' }} — Adotaê{% endblock %}
 {% macro campo(field, largo=false) %}
 <div class="registration-field{% if largo %} announcement-field-wide{% endif %}">
-    {{ field.label }}
-    {% set ajuda = field.name in ('especie_outro', 'whatsapp') %}
-    {{ field(aria_describedby=(field.name ~ '-ajuda ' if ajuda else '') ~ (field.name ~ '-erro' if field.errors else ''), aria_invalid='true' if field.errors else 'false') }}
-    {% if field.name == 'especie_outro' %}
-    <small id="especie_outro-ajuda">Preencha somente se selecionou “Outro animal doméstico”. Nesse caso, este campo é obrigatório.</small>
-    {% elif field.name == 'whatsapp' %}
-    <small id="whatsapp-ajuda">Use somente dígitos, de 8 a 15 caracteres, começando de 1 a 9. Inclua o código do país e o DDD quando aplicável, sem +, espaços ou pontuação. Exemplo: 5522999999999.</small>
-    {% endif %}
+    <label for="{{ field.id }}">{{ field.label.text }}{% if field.flags.required or field.name == 'especie_outro' %} <span aria-hidden="true">*</span>{% endif %}</label>
+    {% set contato_ausente = form.contato_ausente and field.name in ('email_contato', 'whatsapp') %}
+    {{ field(aria_describedby=('contatos-erro' if contato_ausente else field.name ~ '-erro' if field.errors else ''), aria_invalid='true' if field.errors or contato_ausente else 'false') }}
     {% if field.errors %}<p id="{{ field.name }}-erro" class="field-error" role="alert">{{ field.errors | join(' ') }}</p>{% endif %}
 </div>
 {% endmacro %}
@@ -24,11 +19,28 @@
         <p>Cadastre um animal doméstico de São João da Barra, RJ. Escolha salvar como rascunho ou publicar agora.</p>
         {% endif %}
     </header>
-    {% if mensagem %}<p class="registration-message" role="alert">{{ mensagem }}</p>{% endif %}
+    {% if indisponivel and mensagem %}<p class="registration-message" role="alert">{{ mensagem }}</p>{% endif %}
     {% if not indisponivel %}
-    <form class="announcement-form" method="post" action="{{ url_for('editar_anuncio', animal_id=animal_id) if edicao else url_for('anunciar') }}" enctype="multipart/form-data">
+    <form class="announcement-form" data-contato-ausente="{{ 'true' if form.contato_ausente else 'false' }}" method="post" action="{{ url_for('editar_anuncio', animal_id=animal_id) if edicao else url_for('anunciar') }}" enctype="multipart/form-data">
         {{ form.csrf_token }}
-        <p class="announcement-instructions">Os campos são obrigatórios, exceto os indicados como opcionais.{% if edicao %} Não é necessário informar contatos.{% else %} Para salvar como rascunho, contatos e fotografia são opcionais. Para publicar agora, informe pelo menos um contato válido (e-mail ou WhatsApp) e uma fotografia válida.{% endif %}</p>
+        <p class="announcement-instructions">Campos com * são obrigatórios.</p>
+        {% if form.errors or mensagem or form.contato_ausente %}
+        <div class="announcement-errors" role="alert" tabindex="-1" aria-labelledby="anuncio-erros-titulo">
+            <p id="anuncio-erros-titulo"><strong>Confira antes de continuar:</strong></p>
+            {% if mensagem %}<p>{{ mensagem }}</p>{% endif %}
+            {% if form.errors or form.contato_ausente %}
+            <ul>
+                {% if form.contato_ausente %}<li id="contatos-erro"><a href="#email_contato">Para publicar, informe pelo menos um contato válido: e-mail ou WhatsApp.</a></li>{% endif %}
+                {% for field in form if field.errors %}
+                {% for erro in field.errors %}
+                <li>{% if field.name == 'csrf_token' %}{{ erro }}{% else %}<a href="#{{ field.id }}">{{ erro }}</a>{% endif %}</li>
+                {% endfor %}
+                {% endfor %}
+            </ul>
+            {% endif %}
+            {% if form.foto.data %}<p>Selecione a fotografia novamente antes de enviar.</p>{% endif %}
+        </div>
+        {% endif %}
         <fieldset class="announcement-section">
             <legend>Sobre o animal</legend>
             <div class="announcement-fields">
@@ -51,7 +63,7 @@
         </fieldset>
         <fieldset class="announcement-section">
             <legend>Contatos</legend>
-            <p>Os contatos que você escolher informar serão públicos quando o anúncio for publicado.</p>
+            <p class="announcement-section-note">Para publicar, informe pelo menos um contato: e-mail ou WhatsApp. Os contatos serão públicos.</p>
             <div class="announcement-fields">
                 {{ campo(form.email_contato) }}
                 {{ campo(form.whatsapp) }}
@@ -59,11 +71,12 @@
         </fieldset>
         <fieldset class="announcement-section">
             <legend>Fotografia</legend>
+            <p class="announcement-section-note">Para publicar, adicione uma fotografia.</p>
             {% if not edicao or (reservas is defined and reservas == []) %}
             <div class="registration-field">
                 {{ form.foto.label }}
                 {{ form.foto(aria_describedby='foto-ajuda' ~ (' foto-erro' if form.foto.errors else ''), aria_invalid='true' if form.foto.errors else 'false') }}
-                <small id="foto-ajuda">Uma fotografia JPEG, PNG ou WebP, estática, de até 3 MiB. Após corrigir erros no formulário, selecione a fotografia novamente.</small>
+                <small id="foto-ajuda">Tamanho máximo: 3 MiB.</small>
             </div>
             {% elif reservas is defined and reservas %}
                 {% if reservas | selectattr('estado', 'equalto', 'pronta') | list %}

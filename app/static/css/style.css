@@ -153,14 +153,21 @@ h1, h2 { font-family: var(--heading-font); font-weight: 400; letter-spacing: -.0
 .registration-field small { color: var(--muted); }
 .registration-message { padding: 16px; background: var(--sage-light); border-radius: 8px; overflow-wrap: anywhere; }
 .announcement-page { max-width: 960px; padding-block: 48px; overflow-wrap: anywhere; }
-.announcement-heading { max-width: 64ch; margin-bottom: 32px; }
+.announcement-heading { margin-bottom: 32px; }
 .announcement-heading h1 { margin-bottom: 20px; font-size: clamp(32px, 4vw, 48px); }
 .announcement-heading > p:last-child { color: var(--muted); margin: 0; }
 .announcement-form { padding: clamp(20px, 4vw, 40px); background: var(--surface); border: 1px solid var(--border); border-radius: 14px; }
 .announcement-instructions { color: var(--muted); margin-bottom: 32px; }
+.announcement-errors { margin-bottom: 32px; padding: 20px; border: 1px solid #B53B32; border-radius: 8px; background: #FFF2F0; color: #8B2823; }
+.announcement-errors p { margin-bottom: 8px; }
+.announcement-errors ul { margin: 0; padding-left: 24px; }
+.announcement-errors > :last-child { margin-bottom: 0; }
+.announcement-errors a { display: inline-block; padding-block: 4px; }
+.announcement-errors:focus { outline: 3px solid #8B2823; outline-offset: 3px; }
 .announcement-section { min-width: 0; padding: 24px 0 0; margin: 0 0 32px; border: 0; border-top: 1px solid var(--border); }
 .announcement-section legend { padding: 0 16px 0 0; font: 400 26px/1.3 var(--heading-font); }
 .announcement-section > p { color: var(--muted); }
+.announcement-section-note { font-size: .875rem; }
 .announcement-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: 24px; }
 .announcement-field-wide { grid-column: 1 / -1; }
 .announcement-form .registration-field { min-width: 0; margin: 0; }
@@ -170,6 +177,8 @@ h1, h2 { font-family: var(--heading-font); font-weight: 400; letter-spacing: -.0
 .announcement-photo { display: flex; align-items: center; flex-wrap: wrap; gap: 20px; }
 .announcement-photo p { flex: 1 1 200px; margin: 0; color: var(--muted); }
 .announcement-form .field-error { margin-top: 8px; }
+.announcement-form :is(input, select, textarea)[aria-invalid="true"] { border-color: #B53B32; box-shadow: inset 0 0 0 1px #B53B32; }
+.announcement-form :is(input, select, textarea)[aria-invalid="true"]:focus-visible { outline-color: #B53B32; }
 .announcement-actions { display: flex; flex-wrap: wrap; gap: 16px; padding-top: 24px; border-top: 1px solid var(--border); }
 .announcement-actions .button { max-width: 100%; border: 0; cursor: pointer; font-size: 1rem; }
 .announcement-actions .announcement-button-secondary { border: 1px solid var(--green); background: transparent; color: var(--green); }

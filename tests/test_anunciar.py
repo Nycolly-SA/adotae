@@ -3,6 +3,9 @@ import json
 import logging
 import re
 import unittest
+import subprocess
+import tempfile
+from pathlib import Path
 from io import BytesIO
 from email.parser import BytesParser
 from email.policy import default
@@ -171,14 +174,124 @@ class AnunciarTests(unittest.TestCase):
         page = self.client.get("/anunciar").text
         self.assertIn('name="acao" value="rascunho">Salvar como rascunho</button>', page)
         self.assertIn('name="acao" value="publicar">Publicar agora</button>', page)
-        self.assertIn("pelo menos um contato válido", page)
-        self.assertIn("uma fotografia válida", page)
+        self.assertIn('<p class="announcement-instructions">Campos com * são obrigatórios.</p>', page)
+        self.assertRegex(page, r'<legend>Contatos</legend>\s*<p[^>]*>Para publicar, informe pelo menos um contato: e-mail ou WhatsApp\.')
+        self.assertRegex(page, r'<legend>Fotografia</legend>\s*<p[^>]*>Para publicar, adicione uma fotografia\.')
+        self.assertNotIn('especie_outro-ajuda', page)
+        self.assertNotIn("O complemento da espécie", page)
+        self.assertNotIn('class="announcement-errors"', page)
 
     def test_explicit_draft_without_contacts_or_photo(self):
         response = self.client.post("/anunciar", data=self.data(acao="rascunho"))
         self.assertIn(SUCESSO, self.conferir_publicacao(response))
         self.assertEqual(len(self.inserts()), 1)
         self.assertEqual(self.photo_requests(), [])
+
+    def test_publish_reports_only_missing_requirements(self):
+        for contact, photo in ((False, False), (True, False), (False, True)):
+            with self.subTest(contact=contact, photo=photo):
+                response = self.client.post('/anunciar', data=self.publicar_data(
+                    email_contato='ana@example.com' if contact else '',
+                    foto=self.photo() if photo else None))
+                self.assertEqual(response.status_code, 400)
+                summary = re.search(r'<div class="announcement-errors".*?</div>', response.text, re.S)
+                self.assertIsNotNone(summary)
+                self.assertEqual('pelo menos um contato' in summary.group(), not contact)
+                self.assertEqual('selecione uma fotografia' in summary.group(), not photo)
+                self.assertLess(response.text.index('announcement-instructions'), summary.start())
+                self.assertLess(summary.end(), response.text.index('<fieldset'))
+                if not contact:
+                    self.assertIn('href="#email_contato"', summary.group())
+                if not photo:
+                    self.assertIn('href="#foto"', summary.group())
+        self.assertEqual(self.inserts(), [])
+        self.assertEqual(self.photo_requests(), [])
+
+    def test_missing_contact_highlights_both_fields_with_one_summary_error(self):
+        response = self.client.post('/anunciar', data=self.publicar_data(email_contato='', whatsapp=''))
+        self.assertEqual(response.status_code, 400)
+        for field in ('email_contato', 'whatsapp'):
+            tag = re.search(rf'<input[^>]*id="{field}"[^>]*>', response.text).group()
+            self.assertIn('aria-invalid="true"', tag)
+            self.assertIn('aria-describedby="contatos-erro"', tag)
+        self.assertEqual(response.text.count('Para publicar, informe pelo menos um contato válido:'), 1)
+        self.assertNotIn('id="email_contato-erro"', response.text)
+        self.assertNotIn('id="whatsapp-erro"', response.text)
+        self.assertEqual(self.inserts(), [])
+
+    def test_required_labels_and_select_prompts(self):
+        page = self.client.get('/anunciar').text
+        self.assertIn('Campos com * são obrigatórios.', page)
+        for field in ('nome', 'especie', 'sexo', 'porte', 'idade_aproximada', 'descricao', 'distrito', 'especie_outro'):
+            self.assertRegex(page, rf'<label for="{field}">[^<]+ <span[^>]*>\*</span></label>')
+        for prompt in ('a espécie', 'o sexo', 'o porte', 'o distrito'):
+            self.assertRegex(page, rf'<option[^>]*value="">Selecione {prompt}</option>')
+
+    def test_empty_selects_cannot_publish(self):
+        for field in ('especie', 'sexo', 'porte', 'distrito'):
+            with self.subTest(field=field):
+                response = self.client.post('/anunciar', data=self.publicar_data(**{field: ''}))
+                self.assertEqual(response.status_code, 400)
+                self.assertIn(f'id="{field}-erro"', response.text)
+        self.assertEqual(self.inserts(), [])
+        self.assertEqual(self.photo_requests(), [])
+
+    @unittest.skipUnless(Path('C:/Program Files/Google/Chrome/Application/chrome.exe').exists(),
+                         'Chrome local necessário para verificar os campos')
+    def test_empty_required_fields_show_red_border_after_interaction(self):
+        page = self.client.get('/anunciar').text
+        page = re.sub(r'<link[^>]*>', '', page)
+        page = re.sub(r'<script[^>]*>.*?</script>', '', page, flags=re.S)
+        page = page.replace('</head>', '<style>' + Path('app/static/css/style.css').read_text(encoding='utf8') + '</style></head>')
+        probe = '''
+        const form = document.querySelector('.announcement-form');
+        const name = form.querySelector('#nome');
+        const species = form.querySelector('#especie');
+        const other = form.querySelector('#especie_outro');
+        const red = field => getComputedStyle(field).borderTopColor === 'rgb(181, 59, 50)';
+        const results = {initial: !red(name) && !red(species)};
+        name.dispatchEvent(new FocusEvent('focusout', {bubbles: true}));
+        results.blur = red(name) && name.getAttribute('aria-invalid') === 'true';
+        name.value = 'Fubá';
+        name.dispatchEvent(new Event('input', {bubbles: true}));
+        results.corrected = !red(name) && name.getAttribute('aria-invalid') === 'false';
+        name.value = '   ';
+        name.dispatchEvent(new Event('input', {bubbles: true}));
+        results.whitespace = red(name);
+        form.checkValidity();
+        results.submitSelect = red(species);
+        results.submitTextarea = red(form.querySelector('#descricao'));
+        species.value = 'Gato';
+        species.dispatchEvent(new Event('change', {bubbles: true}));
+        results.selected = !red(species);
+        species.value = 'Outro animal doméstico';
+        species.dispatchEvent(new Event('change', {bubbles: true}));
+        other.dispatchEvent(new FocusEvent('focusout', {bubbles: true}));
+        results.other = red(other);
+        species.value = 'Gato';
+        species.dispatchEvent(new Event('change', {bubbles: true}));
+        results.hidden = other.disabled && !red(other);
+        document.querySelector('#probe-result').textContent = JSON.stringify(results);
+        '''
+        page = page.replace('</body>', '<pre id="probe-result"></pre><script>' +
+                            Path('app/static/js/main.js').read_text(encoding='utf8') + probe + '</script></body>')
+        with tempfile.TemporaryDirectory(prefix='adotae-campos-') as temp:
+            path = Path(temp) / 'form.html'
+            path.write_text(page, encoding='utf8')
+            result = subprocess.run([
+                'C:/Program Files/Google/Chrome/Application/chrome.exe', '--headless',
+                '--disable-gpu', '--disable-background-networking', '--disable-extensions',
+                '--no-first-run', '--no-default-browser-check', '--no-proxy-server',
+                '--host-resolver-rules=MAP * ~NOTFOUND', '--virtual-time-budget=1000',
+                '--user-data-dir=' + str(Path(temp) / 'profile'), '--dump-dom', path.as_uri(),
+            ], capture_output=True, text=True, encoding='utf8', errors='replace', timeout=30)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            output = re.search(r'<pre id="probe-result">(.*?)</pre>', result.stdout, re.S)
+            self.assertIsNotNone(output, result.stdout)
+            results = json.loads(output.group(1))
+            for behavior, passed in results.items():
+                with self.subTest(behavior=behavior):
+                    self.assertTrue(passed)
 
     def test_unknown_or_ambiguous_action_never_writes(self):
         for action in ("", "excluir", "PUBLICAR", ["publicar", "rascunho"]):
@@ -191,7 +304,7 @@ class AnunciarTests(unittest.TestCase):
 
     def test_publish_validation_never_inserts(self):
         changes = [dict(email_contato="", whatsapp=""), dict(email_contato="inválido"),
-                   dict(whatsapp="+5522999999999"), dict(nome=""), dict(foto=None),
+                   dict(whatsapp="5522telefone"), dict(nome=""), dict(foto=None),
                    dict(foto=(BytesIO(b""), "foto.png")),
                    dict(foto=(BytesIO(b"invalid"), "foto.png")),
                    dict(foto=[self.photo(), self.photo()])]
@@ -228,7 +341,7 @@ class AnunciarTests(unittest.TestCase):
 
     def test_direct_publication_accepts_whatsapp_without_email(self):
         response = self.client.post("/anunciar", data=self.publicar_data(
-            email_contato="", whatsapp="5522999999999"))
+            email_contato="", whatsapp="+55 (22) 99999-9999"))
         self.assertIn("Anúncio publicado com sucesso!", self.conferir_publicacao(response))
 
     def test_direct_insert_failure_or_uncertainty_stops_flow(self):
@@ -526,7 +639,7 @@ class AnunciarTests(unittest.TestCase):
         page = self.client.get("/anunciar")
         self.assertEqual(page.status_code, 200)
         self.assertEqual(page.headers["Cache-Control"], "no-store")
-        self.assertIn("somente dígitos", page.text)
+        self.assertIn('placeholder="+55 (22) 99999-9999"', page.text)
         for options in OPCOES_FILTROS.values():
             for value in options:
                 self.assertIn(value, page.text)
@@ -591,8 +704,8 @@ class AnunciarTests(unittest.TestCase):
             ("distrito", "Outra cidade"), ("email_contato", "invalido"),
             ("email_contato", "a@@example.com"))]
         cases += [{"whatsapp": value} for value in (
-            "012345678", "1234567", "1234567890123456", "+5522999999999",
-            "22 99999999", "1234567a", "١٢٣٤٥٦٧٨", "12345678\n9")]
+            "012345678", "1234567", "1234567890123456", "55#22999999999",
+            "( ) - +", "1234567a", "١٢٣٤٥٦٧٨", "12345678/9")]
         for changes in cases:
             with self.subTest(changes=changes):
                 response = self.client.post("/anunciar", data=dict(data, **changes))
@@ -661,6 +774,36 @@ class AnunciarTests(unittest.TestCase):
             self.assertEqual(sent["whatsapp"], phone)
             self.assertEqual(sent["email_contato"], "ana@example.com")
             self.assertEqual(sent["bairro"], "Centro")
+
+    def test_formatted_whatsapp_is_normalized_before_insert(self):
+        for phone, expected in (
+            ('(22) 99999-9999', '22999999999'),
+            ('+55 (22) 99999-9999', '5522999999999'),
+            (' 55.22.99999.9999 ', '5522999999999'),
+            ('22\u00a099999-9999', '22999999999'),
+        ):
+            with self.subTest(phone=phone):
+                response = self.client.post('/anunciar', data=self.data(whatsapp=phone))
+                self.assertEqual(response.status_code, 302)
+                self.assertEqual(json.loads(self.inserts()[-1].content)['whatsapp'], expected)
+
+    def test_whatsapp_has_example_without_formatting_instructions(self):
+        page = self.client.get('/anunciar').text
+        self.assertIn('placeholder="+55 (22) 99999-9999"', page)
+        self.assertNotIn('whatsapp-ajuda', page)
+
+    def test_photo_size_error_is_in_summary_and_requests_reselection(self):
+        initial = self.client.get('/anunciar').text
+        self.assertIn('<small id="foto-ajuda">Tamanho máximo: 3 MiB.</small>', initial)
+        self.assertNotIn('selecione a fotografia novamente', initial.lower())
+        response = self.client.post('/anunciar', data=self.publicar_data(
+            foto=(BytesIO(b'x' * (3 * 1024 * 1024 + 1)), 'foto.png')))
+        self.assertEqual(response.status_code, 400)
+        summary = re.search(r'<div class="announcement-errors".*?</div>', response.text, re.S).group()
+        self.assertIn('A fotografia original deve ter no máximo 3 MiB.', summary)
+        self.assertIn('Selecione a fotografia novamente', summary)
+        self.assertEqual(self.inserts(), [])
+        self.assertEqual(self.photo_requests(), [])
 
     def test_refreshed_jwt_and_isolated_users(self):
         data = self.data()

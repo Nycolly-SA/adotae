@@ -1,5 +1,7 @@
 """Validação dos formulários; senhas são gerenciadas pelo Supabase."""
 
+import re
+
 from flask_wtf import FlaskForm
 from flask_wtf.file import FileField
 from wtforms import EmailField, PasswordField, SelectField, StringField, TextAreaField
@@ -40,6 +42,13 @@ def limpar_opcional(value):
     return limpar_texto(value) or None
 
 
+def limpar_whatsapp(value):
+    if not value or not value.strip():
+        return None
+    # Remove a formatação usual; letras e outros caracteres continuam inválidos.
+    return re.sub(r"[\s()+.\-]", "", value)
+
+
 class SelecaoAnimal(SelectField):
     def pre_validate(self, form):
         try:
@@ -49,7 +58,7 @@ class SelecaoAnimal(SelectField):
 
 
 class AnimalForm(FlaskForm):
-    foto = FileField("Fotografia (opcional)", render_kw={"accept": "image/jpeg,image/png,image/webp"})
+    foto = FileField("Fotografia", render_kw={"accept": "image/jpeg,image/png,image/webp"})
     nome = StringField("Nome do animal", filters=[limpar_texto], validators=[
         DataRequired(message="Informe o nome do animal."),
         Length(max=100, message="Use até 100 caracteres no nome."),
@@ -58,7 +67,7 @@ class AnimalForm(FlaskForm):
     especie_outro = StringField("Qual outro animal doméstico?", filters=[limpar_opcional],
                                 validators=[Optional(), Length(max=60, message="Use até 60 caracteres.")],
                                 render_kw={"maxlength": 60})
-    sexo = SelecaoAnimal("Sexo", choices=["", "Macho", "Fêmea"],
+    sexo = SelecaoAnimal("Sexo", choices=[("", "Selecione o sexo"), ("Macho", "Macho"), ("Fêmea", "Fêmea")],
                        validators=[DataRequired(message="Selecione o sexo.")])
     idade_aproximada = StringField("Idade aproximada", filters=[limpar_texto], validators=[
         DataRequired(message="Informe a idade aproximada."),
@@ -70,20 +79,24 @@ class AnimalForm(FlaskForm):
         Length(max=2000, message="Use até 2.000 caracteres na descrição."),
     ], render_kw={"maxlength": 2000, "rows": 6})
     distrito = SelecaoAnimal("Distrito", validators=[DataRequired(message="Selecione o distrito.")])
-    bairro = StringField("Bairro (opcional)", filters=[limpar_opcional], validators=[
+    bairro = StringField("Bairro", filters=[limpar_opcional], validators=[
         Optional(), Length(max=100, message="Use até 100 caracteres no bairro."),
     ], render_kw={"maxlength": 100})
-    email_contato = EmailField("E-mail de contato (opcional)", filters=[limpar_opcional],
-                               validators=[Optional(), Email(message="Informe um e-mail válido.")])
-    whatsapp = StringField("WhatsApp (opcional)", filters=[limpar_opcional], validators=[
+    email_contato = EmailField("E-mail de contato", filters=[limpar_opcional],
+                               validators=[Optional(), Email(message="Informe um e-mail válido.")],
+                               render_kw={"placeholder": "seuemail@exemplo.com"})
+    whatsapp = StringField("WhatsApp", filters=[limpar_whatsapp], validators=[
         Optional(), Regexp(r"\A[1-9][0-9]{7,14}\Z", message=(
-            "Use somente dígitos, de 8 a 15 caracteres, começando de 1 a 9.")),
-    ], render_kw={"maxlength": 15, "inputmode": "numeric", "pattern": "[1-9][0-9]{7,14}"})
+            "Informe um WhatsApp válido, com 8 a 15 dígitos.")),
+    ], render_kw={"maxlength": 40, "type": "tel", "inputmode": "tel", "placeholder": "+55 (22) 99999-9999"})
 
     def __init__(self, opcoes_filtros, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        for field, key in ((self.especie, "tipo"), (self.porte, "porte"), (self.distrito, "distrito")):
-            field.choices = [""] + list(opcoes_filtros[key])
+        self.contato_ausente = False
+        for field, key, instrucao in ((self.especie, "tipo", "Selecione a espécie"),
+                                      (self.porte, "porte", "Selecione o porte"),
+                                      (self.distrito, "distrito", "Selecione o distrito")):
+            field.choices = [("", instrucao)] + [(opcao, opcao) for opcao in opcoes_filtros[key]]
         if self.especie.data != "Outro animal doméstico":
             self.especie_outro.data = None
 

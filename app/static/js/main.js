@@ -1,4 +1,66 @@
 // Os links permanecem visíveis se JavaScript estiver desativado.
+const announcementErrors = document.querySelector('.announcement-errors');
+if (announcementErrors) announcementErrors.focus();
+
+const speciesSelect = document.querySelector('.announcement-form #especie');
+const otherSpecies = document.querySelector('.announcement-form #especie_outro');
+
+if (speciesSelect && otherSpecies) {
+    const updateOtherSpecies = () => {
+        const isOther = speciesSelect.value === 'Outro animal doméstico';
+        otherSpecies.closest('.registration-field').hidden = !isOther;
+        otherSpecies.disabled = !isOther;
+        otherSpecies.required = isOther;
+        if (!isOther) {
+            otherSpecies.value = '';
+            otherSpecies.setAttribute('aria-invalid', 'false');
+            delete otherSpecies.dataset.validationTouched;
+        }
+    };
+    speciesSelect.addEventListener('change', updateOtherSpecies);
+    updateOtherSpecies();
+}
+
+const announcementForm = document.querySelector('.announcement-form');
+if (announcementForm) {
+    const contactEmail = announcementForm.querySelector('#email_contato');
+    const contactPhone = announcementForm.querySelector('#whatsapp');
+    const updateFieldValidity = (field) => {
+        if (!field.matches('input:not([type="hidden"]), select, textarea')) return;
+        const emptyRequired = field.required && field.value.trim() === '';
+        const missingContact = announcementForm.dataset.contatoAusente === 'true' &&
+            (field === contactEmail || field === contactPhone) &&
+            !contactEmail.value.trim() && !contactPhone.value.trim();
+        const invalid = !field.disabled && (emptyRequired || missingContact || !field.validity.valid);
+        field.setAttribute('aria-invalid', String(invalid));
+    };
+    announcementForm.addEventListener('focusout', (event) => {
+        event.target.dataset.validationTouched = 'true';
+        updateFieldValidity(event.target);
+    });
+    const updateAllFields = () => {
+        announcementForm.querySelectorAll('input:not([type="hidden"]), select, textarea').forEach((field) => {
+            field.dataset.validationTouched = 'true';
+            updateFieldValidity(field);
+        });
+    };
+    announcementForm.addEventListener('invalid', updateAllFields, true);
+    announcementForm.addEventListener('submit', updateAllFields);
+    ['input', 'change'].forEach((type) => {
+        announcementForm.addEventListener(type, (event) => {
+            const field = event.target;
+            if (field.dataset.validationTouched || field.getAttribute('aria-invalid') === 'true') {
+                updateFieldValidity(field);
+            }
+            if (announcementForm.dataset.contatoAusente === 'true' &&
+                (field === contactEmail || field === contactPhone)) {
+                updateFieldValidity(contactEmail);
+                updateFieldValidity(contactPhone);
+            }
+        });
+    });
+}
+
 document.querySelectorAll('.account-thumbnail img').forEach((image) => {
     const showPlaceholder = () => {
         image.hidden = true;
