@@ -111,7 +111,7 @@ h1, h2 { font-family: var(--heading-font); font-weight: 400; letter-spacing: -.0
 .catalog-empty { padding: 40px 24px; text-align: center; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); }
 .catalog-empty h2 { font-size: 26px; margin-bottom: 16px; }
 .catalog-empty p { margin-bottom: 0; color: var(--muted); }
-.animal-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 22px; }
+.animal-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 22px; }
 .animal-card { overflow: hidden; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; }
 .card-image { position: relative; }
 .card-image img { aspect-ratio: 6 / 5; object-fit: cover; }
