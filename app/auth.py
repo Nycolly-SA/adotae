@@ -178,6 +178,10 @@ def registrar_auth(app):
             return render_template("login.html", indisponivel=True, mensagem=INDISPONIVEL), 503
         if not g.usuario:
             return redirect(url_for("login"))
+        filtro_status = request.args.get("status", "todos")
+        if filtro_status not in ("todos", "publicado", "rascunho", "adotado"):
+            filtro_status = "todos"
+        total_anuncios = 0
         anuncios = None
         try:
             registros = (g.auth_cliente.table("animais")
@@ -204,9 +208,15 @@ def registrar_auth(app):
                     isinstance(foto, dict) and foto.get("estado") == "pronta"
                     for foto in fotos)
             anuncios = registros
+            total_anuncios = len(anuncios)
+            if filtro_status != "todos":
+                anuncios = [animal for animal in anuncios if (
+                    "adotado" if animal["status_adocao"] == "adotado"
+                    else animal["status_publicacao"]) == filtro_status]
         except (APIError, HTTPError, SupabaseException, ValueError, TypeError):
             pass
-        return render_template("minha_conta.html", form=FlaskForm(), anuncios=anuncios), (
+        return render_template("minha_conta.html", form=FlaskForm(), anuncios=anuncios,
+                               filtro_status=filtro_status, total_anuncios=total_anuncios), (
             503 if anuncios is None else 200)
 
     @app.post("/logout")

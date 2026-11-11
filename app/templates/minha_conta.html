@@ -18,6 +18,20 @@
                 <h2 id="anuncios-titulo">Meus anúncios</h2>
                 {% if anuncios is not none %}<span class="account-count">{{ anuncios|length }} {{ 'anúncio' if anuncios|length == 1 else 'anúncios' }}</span>{% endif %}
             </div>
+            {% if anuncios is not none %}
+            <form class="account-filters" method="get" action="{{ url_for('minha_conta') }}">
+                <div class="account-filter-field">
+                    <label for="filtro-status">Status do anúncio</label>
+                    <select id="filtro-status" name="status">
+                        {% for valor, rotulo in [('todos', 'Todos'), ('publicado', 'Publicados'), ('rascunho', 'Rascunhos'), ('adotado', 'Adotados')] %}
+                        <option value="{{ valor }}"{% if filtro_status == valor %} selected{% endif %}>{{ rotulo }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <button class="button" type="submit">Filtrar</button>
+                {% if filtro_status != 'todos' %}<a class="text-link" href="{{ url_for('minha_conta') }}">Limpar filtro</a>{% endif %}
+            </form>
+            {% endif %}
             {% if anuncios is none %}
             <p class="registration-message" role="alert">Não foi possível carregar seus anúncios agora. Tente novamente mais tarde.</p>
             {% elif anuncios %}
@@ -79,6 +93,12 @@
                 </li>
                 {% endfor %}
             </ul>
+            {% elif total_anuncios %}
+            <div class="account-empty">
+                <h3>Nenhum anúncio com este status.</h3>
+                <p>Escolha outro status ou veja todos os seus anúncios.</p>
+                <a class="text-link" href="{{ url_for('minha_conta') }}">Ver todos os anúncios</a>
+            </div>
             {% else %}
             <div class="account-empty">
                 <h3>Seu primeiro anúncio começa aqui.</h3>

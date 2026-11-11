@@ -188,7 +188,7 @@ class MiniaturasTests(unittest.TestCase):
                 const thumb = image.parentElement.getBoundingClientRect();
                 const content = doc.querySelector('.account-animal-content').getBoundingClientRect();
                 const card = doc.querySelector('.account-page').getBoundingClientRect();
-                const button = doc.querySelector('button[type="submit"]').getBoundingClientRect();
+                const button = doc.querySelector('.account-animal-actions button[type="submit"]').getBoundingClientRect();
                 results.push({width, square: thumb.width === thumb.height,
                     left: thumb.right <= content.left,
                     cover: frame.contentWindow.getComputedStyle(image).objectFit === 'cover',

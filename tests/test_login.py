@@ -410,6 +410,53 @@ class LoginTests(unittest.TestCase):
         self.assertNotIn("Você ainda não cadastrou nenhum animal.", page.text)
         self.assertEqual(page.headers["Cache-Control"], "no-store")
 
+    def test_account_status_filter_matches_displayed_status_and_preserves_order(self):
+        self.cookies()
+        cases = [
+            ("Bento", "publicado", "disponivel", False),
+            ("Luna", "rascunho", "disponivel", False),
+            ("Amora", "publicado", "adotado", False),
+            ("Paçoca", "publicado", "disponivel", True),
+            ("Mel", "rascunho", "adotado", False),
+        ]
+        self.list_result = [dict(id=f"00000000-0000-0000-0000-{i:012}", nome=name,
+                                 especie="Gato", distrito="Grussaí", status_publicacao=publication,
+                                 status_adocao=adoption, oculto_admin=hidden)
+                            for i, (name, publication, adoption, hidden) in enumerate(cases)]
+        for status, expected in (("todos", ["Bento", "Luna", "Amora", "Paçoca", "Mel"]),
+                                 ("publicado", ["Bento", "Paçoca"]),
+                                 ("rascunho", ["Luna"]), ("adotado", ["Amora", "Mel"])):
+            with self.subTest(status=status):
+                self.calls.clear()
+                response = self.client.get("/minha-conta", query_string={"status": status})
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(re.findall(r"<h3>(.*?)</h3>", response.text), expected)
+                self.assertIn(f'value="{status}" selected', response.text)
+                self.assertEqual(len(self.list_requests()), 1)
+                self.assertEqual(self.list_requests()[0].url.params["usuario_id"],
+                                 "eq." + self.identity_id)
+                self.assertEqual(self.list_requests()[0].url.params["order"], "criado_em.desc")
+
+    def test_account_status_filter_empty_result_can_return_to_all(self):
+        self.cookies()
+        self.list_result = [dict(id="00000000-0000-0000-0000-000000000010", nome="Bento",
+                                 especie="Cachorro", distrito="Grussaí", status_publicacao="rascunho",
+                                 status_adocao="disponivel", oculto_admin=False)]
+        response = self.client.get("/minha-conta?status=adotado")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Nenhum anúncio com este status.", response.text)
+        self.assertNotIn("Você ainda não cadastrou nenhum animal.", response.text)
+        self.assertNotIn("<h3>Bento</h3>", response.text)
+        self.assertIn('href="/minha-conta">Ver todos os anúncios', response.text)
+        self.assertIn("<h3>Bento</h3>", self.client.get("/minha-conta").text)
+
+    def test_account_invalid_status_falls_back_to_all(self):
+        self.cookies()
+        response = self.client.get("/minha-conta?status=invalido")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('value="todos" selected', response.text)
+        self.assertIn("Você ainda não cadastrou nenhum animal.", response.text)
+
     def test_account_empty_list_is_friendly(self):
         self.cookies()
         page = self.client.get("/minha-conta")
