@@ -10,7 +10,6 @@
         </div>
         {% if not indisponivel %}<span class="catalog-count">{{ animais|length }} {{ 'animal encontrado' if animais|length == 1 else 'animais encontrados' }}</span>{% endif %}
     </div>
-    <div class="catalog-notice"><span class="note-symbol" aria-hidden="true">i</span><p>Projeto acadêmico: os dados de validação podem ser fictícios.</p></div>
     <form method="get" action="{{ url_for('animais') }}" class="catalog-filters">
         {% for campo, rotulo in [('tipo', 'Tipo de animal'), ('porte', 'Porte'), ('distrito', 'Distrito')] %}
         <div class="filter-field">

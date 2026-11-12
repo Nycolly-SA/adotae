@@ -139,6 +139,10 @@ class RouteTests(unittest.TestCase):
         html = response.get_data(as_text=True)
         self.assertIn("Adotaê", html)
         self.assertIn("Um encontro pode mudar duas vidas.", html)
+        self.assertIn("Explore o catálogo <", html)
+        self.assertNotIn("Explore o catálogo demonstrativo", html)
+        self.assertNotIn("demo-note", html)
+        self.assertNotIn("Os animais do catálogo são fictícios", html)
         page = PageParser()
         page.feed(html)
         self.assertIn("/animais", page.links)
@@ -151,7 +155,7 @@ class RouteTests(unittest.TestCase):
         self.assertEqual(html.count("Fotografia temporariamente indisponível"), 4)
         self.assertIn("Ver detalhes", html)
         self.assertNotIn("os animais e os dados são fictícios", html)
-        self.assertIn("dados de validação podem ser fictícios", html)
+        self.assertNotIn("dados de validação podem ser fictícios", html)
         self.assertIn("2 anos", html)
 
     def assert_catalog(self, query, names):
@@ -245,6 +249,8 @@ class RouteTests(unittest.TestCase):
                 self.assertIn("Contato demonstrativo", html)
                 self.assertIn("dados são fictícios", html)
                 self.assertIn("Não há contatos disponíveis nesta demonstração.", html)
+                self.assertIn("Nos anúncios reais, esta seção exibe os contatos", html)
+                self.assertNotIn("Em uma etapa futura", html)
                 page = PageParser()
                 page.feed(html)
                 self.assertEqual(page.forms, [])
