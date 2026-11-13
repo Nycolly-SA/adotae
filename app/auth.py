@@ -99,7 +99,7 @@ def registrar_auth(app):
             # Cookies de navegador: a validade efetiva é controlada pelo Supabase.
             response.set_cookie(ACCESS_COOKIE, g.auth_tokens.access_token, **opcoes)
             response.set_cookie(REFRESH_COOKIE, g.auth_tokens.refresh_token, **opcoes)
-        if (request.endpoint in ("login", "minha_conta", "miniatura_propria", "logout", "cadastro", "confirmar_email", "anunciar", "editar_anuncio", "adicionar_foto", "publicar_anuncio", "adotar_anuncio", "animais", "animal_detalhes_publico")
+        if (request.endpoint in ("login", "minha_conta", "miniatura_propria", "logout", "cadastro", "confirmar_email", "anunciar", "editar_anuncio", "adicionar_foto", "publicar_anuncio", "adotar_anuncio", "remover_anuncio", "animais", "animal_detalhes_publico")
                 or session.modified
                 or request.cookies.get(ACCESS_COOKIE) or request.cookies.get(REFRESH_COOKIE)
                 or getattr(g, "auth_tokens", None)):
@@ -185,8 +185,9 @@ def registrar_auth(app):
         anuncios = None
         try:
             registros = (g.auth_cliente.table("animais")
-                         .select("id,nome,especie,distrito,status_publicacao,status_adocao,oculto_admin,animal_fotos(id,estado)")
+                         .select("id,nome,especie,distrito,status_publicacao,status_adocao,oculto_admin,removido_em,animal_fotos(id,estado)")
                          .eq("usuario_id", g.usuario.id)
+                         .is_("removido_em", "null")
                          .order("criado_em", desc=True).execute().data)
             # Só apresentar a lista quando todos os registros forem válidos.
             if not isinstance(registros, list) or any(
@@ -200,6 +201,7 @@ def registrar_auth(app):
                 for animal in registros
             ):
                 raise ValueError("Resposta de listagem inválida")
+            registros = [animal for animal in registros if animal.get("removido_em") is None]
             for animal in registros:
                 animal["id"] = str(UUID(animal.get("id")))
                 # No máximo três reservas por anúncio; sem consulta por cartão.

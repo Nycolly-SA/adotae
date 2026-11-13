@@ -351,7 +351,8 @@ class LoginTests(unittest.TestCase):
         query = self.list_requests()[0]
         self.assertEqual(query.method, "GET")
         self.assertEqual(dict(query.url.params), dict(
-            select="id,nome,especie,distrito,status_publicacao,status_adocao,oculto_admin,animal_fotos(id,estado)",
+            select="id,nome,especie,distrito,status_publicacao,status_adocao,oculto_admin,removido_em,animal_fotos(id,estado)",
+            removido_em="is.null",
             usuario_id="eq.00000000-0000-0000-0000-000000000001",
             order="criado_em.desc"))
         self.assertEqual(query.headers["accept-profile"], "public")

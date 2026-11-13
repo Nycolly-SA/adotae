@@ -20,9 +20,21 @@ Em `/cadastro`, é possível criar uma conta com nome, e-mail e senha de pelo me
 
 O fluxo de confirmação pela rota `/auth/confirm` foi validado manualmente: o servidor valida o `token_hash` com o Supabase e redireciona para a página inicial, sem parâmetros na URL. Uma mensagem temporária informa o resultado abaixo do cabeçalho; em caso de sucesso, oferece um link para entrar. A confirmação não inicia login nem guarda os tokens retornados. Links inválidos, expirados ou já utilizados não mostram sucesso.
 
-Em `/login`, usuários com e-mail confirmado podem entrar. A sessão permanece entre requisições, com renovação dos tokens expirados quando possível. `/minha-conta` exige autenticação e apresenta uma saudação e o botão “Sair”, que envia um POST protegido por CSRF. A navegação oferece “Entrar” ou “Minha conta” conforme a identidade validada. A listagem dos próprios anúncios já funciona em `/minha-conta`; edição de anúncios publicados, exclusão, recuperação de senha e edição de perfil continuam pendentes.
+Em `/login`, usuários com e-mail confirmado podem entrar. A sessão permanece entre requisições, com renovação dos tokens expirados quando possível. `/minha-conta` exige autenticação e apresenta uma saudação e o botão “Sair”, que envia um POST protegido por CSRF. A navegação oferece “Entrar” ou “Minha conta” conforme a identidade validada. A listagem dos próprios anúncios já funciona em `/minha-conta`; edição de anúncios publicados, recuperação de senha e edição de perfil continuam pendentes.
 
-Em `/minha-conta`, o link “Anunciar animal” abre `/anunciar`. Usuários autenticados com e-mail confirmado podem escolher “Salvar como rascunho”, com contato e fotografia opcionais, ou “Publicar agora”, que exige pelo menos um contato válido (e-mail ou WhatsApp) e exatamente uma fotografia válida. O formulário usa Flask-WTF, CSRF e validação no servidor, reutilizando as opções do catálogo. Campos opcionais vazios viram NULL; o detalhe de espécie é obrigatório apenas para “Outro animal doméstico”. A validação e o processamento da fotografia ocorrem antes de criar o registro. Após a criação confirmada do rascunho, a publicação direta usa `enviar_foto()` e só chama `publicar_anuncio` depois de confirmar a fotografia como `pronta`. O sucesso depende de uma nova leitura própria com estado `publicado`. A edição de rascunhos mantém apenas “Salvar alterações”. Moderação e exclusão ainda não estão disponíveis.
+Em “Meus anúncios”, “Excluir” permite remover logicamente rascunhos e anúncios
+publicados disponíveis, após aviso e confirmação explícita. O POST
+`/anuncios/<uuid>/remover` usa CSRF e somente o cliente autenticado para chamar
+`remover_anuncio`. O sucesso exige nova leitura própria com `removido_em`
+preenchido; falha de confirmação informa resultado incerto, sem repetir a RPC.
+Anúncios removidos saem da listagem e das contagens, com filtro também no
+Supabase. Anúncios adotados não podem ser excluídos. Não há exclusão física,
+restauração pela interface ou limpeza automática de fotos. A integração depende
+da migração `202611120001_remover_anuncio.sql`, aplicada e validada no Supabase
+`adotae-testes`. Os resultados e limites estão registrados no
+[README do banco](supabase/README.md#remoção-lógica--validada-em-adotae-testes).
+
+Em `/minha-conta`, o link “Anunciar animal” abre `/anunciar`. Usuários autenticados com e-mail confirmado podem escolher “Salvar como rascunho”, com contato e fotografia opcionais, ou “Publicar agora”, que exige pelo menos um contato válido (e-mail ou WhatsApp) e exatamente uma fotografia válida. O formulário usa Flask-WTF, CSRF e validação no servidor, reutilizando as opções do catálogo. Campos opcionais vazios viram NULL; o detalhe de espécie é obrigatório apenas para “Outro animal doméstico”. A validação e o processamento da fotografia ocorrem antes de criar o registro. Após a criação confirmada do rascunho, a publicação direta usa `enviar_foto()` e só chama `publicar_anuncio` depois de confirmar a fotografia como `pronta`. O sucesso depende de uma nova leitura própria com estado `publicado`. A edição de rascunhos mantém apenas “Salvar alterações”. A moderação ainda não está disponível.
 
 Criação, fotografia e publicação são operações separadas. Falhas parciais preservam o rascunho e eventuais reservas ou arquivos; não há repetição automática nem exclusão para compensar falhas. Se o INSERT não puder ser confirmado, a aplicação não afirma que o anúncio foi criado e orienta conferir “Meus anúncios” antes de cadastrar outro animal. Se a fotografia falhar, a RPC de publicação não é chamada. Se a publicação não for comprovada, a conta mostra um aviso ou resultado incerto. A recuperação de reservas e arquivos incompletos ainda não está disponível pela interface.
 

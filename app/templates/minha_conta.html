@@ -89,6 +89,17 @@
                         </details>
                     </div>
                     {% endif %}
+                    {% if animal.status_adocao == 'disponivel' and animal.status_publicacao in ['rascunho', 'publicado'] %}
+                    <details class="account-adoption">
+                        <summary>Excluir</summary>
+                        <form class="account-adoption-form" method="post" action="{{ url_for('remover_anuncio', animal_id=animal.id) }}">
+                            {{ form.csrf_token(id=false) }}
+                            <p id="aviso-exclusao-{{ animal.id }}">O anúncio será retirado da plataforma e não poderá ser recuperado pela interface.</p>
+                            <label class="account-adoption-check"><input type="checkbox" name="confirmar_remocao" value="sim" required aria-describedby="aviso-exclusao-{{ animal.id }}"> <span>Confirmo a exclusão do anúncio de {{ animal.nome }}.</span></label>
+                            <button class="button" type="submit" aria-label="Excluir anúncio de {{ animal.nome }}">Excluir</button>
+                        </form>
+                    </details>
+                    {% endif %}
                     </div>
                 </li>
                 {% endfor %}

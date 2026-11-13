@@ -29,7 +29,7 @@ class PublicarTests(unittest.TestCase):
         self.client.set_cookie("adotae_access", self.access)
         self.client.set_cookie("adotae_refresh", "private-refresh")
         self.row = dict(id=ANIMAL_ID, usuario_id=self.identity["id"], nome="Fubá",
-                        especie="Gato", distrito="Grussaí", status_publicacao="rascunho", status_adocao="disponivel", oculto_admin=False)
+                        especie="Gato", distrito="Grussaí", status_publicacao="rascunho", status_adocao="disponivel", oculto_admin=False, removido_em=None)
         self.calls = []
         self.reads = []
         self.rpc_failure = None
@@ -128,6 +128,7 @@ class PublicarTests(unittest.TestCase):
             self.assertEqual(req.headers["authorization"], "Bearer " + self.access)
             self.assertEqual(req.headers["apikey"], "sb_publishable_test")
         for req in queries:
+            self.assertIn("removido_em", req.url.params["select"].split(","))
             self.assertEqual(req.url.params["id"], "eq." + ANIMAL_ID)
             self.assertEqual(req.url.params["usuario_id"], "eq." + self.identity["id"])
 
@@ -168,6 +169,28 @@ class PublicarTests(unittest.TestCase):
         self.assertNotIn(SUCESSO, page.text)
         self.assertEqual(self.rpcs(), [])
 
+    def test_removal_after_publication_never_confirms_success(self):
+        for failure in (None, "network"):
+            with self.subTest(failure=failure):
+                self.row["status_publicacao"] = "rascunho"
+                self.calls.clear()
+                self.rpc_failure = failure
+                self.reads = [copy.deepcopy([self.row]), [dict(
+                    self.row, status_publicacao="publicado", removido_em="2026-11-12T12:00:00+00:00")]]
+                page = self.submit()
+                self.assertNotIn(SUCESSO, page.text)
+                self.assertIn("anúncio foi excluído", page.text)
+                self.assertIn('role="alert"', page.text)
+                self.assertEqual(len(self.rpcs()), 1)
+
+    def test_removed_announcement_does_not_call_publication_rpc(self):
+        for publication in ("rascunho", "publicado"):
+            with self.subTest(publication=publication):
+                self.calls.clear()
+                self.row.update(status_publicacao=publication, removido_em="2026-11-12T12:00:00+00:00")
+                self.assertNotIn(SUCESSO, self.submit().text)
+                self.assertEqual(self.rpcs(), [])
+
     def test_refusal_prerequisites_and_lock_conflict(self):
         self.publish = False
         for code, text in (("42501", "Não foi possível publicar."), ("55P03", "Aguarde")):
@@ -203,6 +226,7 @@ class PublicarTests(unittest.TestCase):
 
     def test_failed_or_invalid_confirmation_is_uncertain(self):
         for result in ("network", None, {}, "unexpected", [], [{}], [None], [self.row, self.row],
+                       [{k: v for k, v in self.row.items() if k != "removido_em"}],
                        [dict(self.row, usuario_id="other")], [dict(self.row, id="other")],
                        [dict(self.row, status_publicacao="unknown")]):
             for failure in (None, "network"):

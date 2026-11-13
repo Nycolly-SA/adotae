@@ -1,6 +1,7 @@
 """Aplicação demonstrativa do projeto acadêmico Adotaê."""
 
 import os
+from datetime import datetime
 import re
 from pathlib import Path
 from typing import cast
@@ -46,7 +47,7 @@ def verificar_configuracao_csrf():
         request.max_content_length = 4 * 1024 * 1024
     if request.endpoint == "adicionar_foto" and not app.secret_key:
         return render_template("foto.html", mensagem=INDISPONIVEL), 503
-    if request.endpoint in ("login", "minha_conta", "logout", "anunciar", "editar_anuncio", "publicar_anuncio", "adotar_anuncio") and not app.secret_key:
+    if request.endpoint in ("login", "minha_conta", "logout", "anunciar", "editar_anuncio", "publicar_anuncio", "adotar_anuncio", "remover_anuncio") and not app.secret_key:
         return render_template("login.html", indisponivel=True,
                                mensagem="Acesso à conta indisponível no momento. Tente novamente mais tarde."), 503
     if request.endpoint == "cadastro" and not app.secret_key:
@@ -75,6 +76,20 @@ def arquivo_grande(error):
 
 @app.errorhandler(CSRFError)
 def erro_csrf(error):
+    if request.endpoint == "remover_anuncio":
+        return render_template_string("""
+            {% extends "base.html" %}
+            {% block title %}Exclusão recusada — Adotaê{% endblock %}
+            {% block content %}
+            <section class="container registration">
+                <div class="registration-card">
+                    <h1>Exclusão recusada</h1>
+                    <p class="registration-message" role="alert">A exclusão foi recusada por CSRF inválido ou expirado. Recarregue sua conta e tente novamente.</p>
+                    <a class="text-link" href="{{ url_for('minha_conta') }}">Voltar à minha conta</a>
+                </div>
+            </section>
+            {% endblock %}
+        """), 400
     if request.endpoint == "adotar_anuncio":
         return render_template_string("""
             {% extends "base.html" %}
@@ -219,18 +234,20 @@ def editar_anuncio(animal_id):
     mensagem = "Não foi possível carregar o rascunho agora. Tente novamente mais tarde."
     try:
         registros = (g.auth_cliente.table("animais")
-                     .select(",".join(("id", "usuario_id", "status_publicacao", "status_adocao", *campos)))
+                     .select(",".join(("id", "usuario_id", "status_publicacao", "status_adocao", "removido_em", *campos)))
                      .eq("id", str(animal_id)).eq("usuario_id", str(g.usuario.id))
-                     .eq("status_publicacao", "rascunho").eq("status_adocao", "disponivel").execute().data)
+                     .eq("status_publicacao", "rascunho").eq("status_adocao", "disponivel")
+                     .is_("removido_em", "null").execute().data)
         if registros == []:
             abort(404)
         if not isinstance(registros, list) or len(registros) != 1 or not isinstance(registros[0], dict):
             raise ValueError("Resposta de leitura inválida")
         animal = registros[0]
-        if any(campo not in animal for campo in ("id", "usuario_id", "status_publicacao", "status_adocao")):
+        if any(campo not in animal for campo in ("id", "usuario_id", "status_publicacao", "status_adocao", "removido_em")):
             raise ValueError("Identificação de rascunho ausente")
         if (animal.get("id") != str(animal_id) or animal.get("usuario_id") != str(g.usuario.id)
-                or animal.get("status_publicacao") != "rascunho" or animal.get("status_adocao") != "disponivel"):
+                or animal.get("status_publicacao") != "rascunho" or animal.get("status_adocao") != "disponivel"
+                or animal["removido_em"] is not None):
             abort(404)
         opcionais = ("especie_outro", "bairro", "email_contato", "whatsapp")
         if any(campo not in animal or (
@@ -337,9 +354,9 @@ def miniatura_propria(animal_id):
 
 
 def consultar_publicacao_propria(animal_id):
-    """Lê apenas o estado do anúncio próprio; nunca aceita outra identidade."""
+    """Lê publicação e remoção do anúncio próprio; nunca aceita outra identidade."""
     registros = (g.auth_cliente.table("animais")
-                 .select("id,usuario_id,status_publicacao")
+                 .select("id,usuario_id,status_publicacao,removido_em")
                  .eq("id", str(animal_id)).eq("usuario_id", str(g.usuario.id))
                  .execute().data)
     if registros == []:
@@ -349,8 +366,11 @@ def consultar_publicacao_propria(animal_id):
     animal = registros[0]
     if animal.get("id") != str(animal_id) or animal.get("usuario_id") != str(g.usuario.id):
         return None
-    if animal.get("status_publicacao") not in ("rascunho", "publicado"):
+    if (animal.get("status_publicacao") not in ("rascunho", "publicado")
+            or "removido_em" not in animal):
         raise ValueError("Estado de publicação inválido")
+    if animal["removido_em"] is not None:
+        return "removido"
     return animal["status_publicacao"]
 
 
@@ -366,7 +386,7 @@ def publicar_anuncio(animal_id):
     except falhas:
         flash("Não foi possível consultar o anúncio agora. Tente novamente mais tarde.", "rascunho-aviso")
         return redirect(url_for("minha_conta"))
-    if estado is None:
+    if estado is None or estado == "removido":
         # Não distinguir inexistência de falta de autorização.
         flash("Anúncio indisponível para publicação.", "rascunho-aviso")
         return redirect(url_for("minha_conta"))
@@ -397,6 +417,9 @@ def executar_publicacao(animal_id):
         estado = None
     if estado == "publicado":
         flash("Anúncio publicado com sucesso!", "rascunho-sucesso")
+    elif estado == "removido":
+        flash("A publicação não foi confirmada porque o anúncio foi excluído. Confira ‘Meus anúncios’.",
+              "rascunho-aviso")
     elif estado is None:
         flash("O resultado da publicação é incerto. Confira ‘Meus anúncios’ antes de tentar novamente.",
               "rascunho-aviso")
@@ -481,6 +504,88 @@ def adotar_anuncio(animal_id):
               "antes de tentar novamente.", "rascunho-aviso")
     else:
         flash("A adoção não foi confirmada. Na consulta, o anúncio continua disponível. "
+              "Confira ‘Meus anúncios’ antes de tentar novamente.", "rascunho-aviso")
+    return redirect(url_for("minha_conta"))
+
+
+def consultar_remocao_propria(animal_id):
+    """Inclui removidos para confirmar a operação com a sessão do dono."""
+    registros = (g.auth_cliente.table("animais")
+                 .select("id,usuario_id,status_publicacao,status_adocao,removido_em")
+                 .eq("id", str(animal_id)).eq("usuario_id", str(g.usuario.id))
+                 .execute().data)
+    if registros == []:
+        return None
+    if not isinstance(registros, list) or len(registros) != 1 or not isinstance(registros[0], dict):
+        raise ValueError("Resposta de leitura inválida")
+    animal = registros[0]
+    if animal.get("id") != str(animal_id) or animal.get("usuario_id") != str(g.usuario.id):
+        return None
+    if (animal.get("status_publicacao") not in ("rascunho", "publicado")
+            or animal.get("status_adocao") not in ("disponivel", "adotado")
+            or "removido_em" not in animal):
+        raise ValueError("Estado do anúncio inválido")
+    if animal["removido_em"] is not None:
+        if not isinstance(animal["removido_em"], str):
+            raise ValueError("Data de remoção inválida")
+        data = datetime.fromisoformat(animal["removido_em"])
+        if data.tzinfo is None:
+            raise ValueError("Data de remoção sem fuso")
+    return animal
+
+
+@app.post("/anuncios/<uuid:animal_id>/remover")
+def remover_anuncio(animal_id):
+    if g.auth_indisponivel:
+        return render_template("login.html", indisponivel=True, mensagem=INDISPONIVEL), 503
+    if not g.usuario:
+        return redirect(url_for("login"))
+    if request.form.getlist("confirmar_remocao") != ["sim"]:
+        flash("É necessária a confirmação explícita da exclusão. Confira o aviso no cartão do animal.",
+              "rascunho-aviso")
+        return redirect(url_for("minha_conta"))
+    falhas = (APIError, HTTPError, SupabaseException, ValueError, TypeError)
+    try:
+        animal = consultar_remocao_propria(animal_id)
+    except falhas:
+        flash("Não foi possível consultar o anúncio agora. Tente novamente mais tarde.", "rascunho-aviso")
+        return redirect(url_for("minha_conta"))
+    if animal is None:
+        flash("Anúncio indisponível para exclusão.", "rascunho-aviso")
+        return redirect(url_for("minha_conta"))
+    if animal["status_adocao"] == "adotado":
+        flash("Um anúncio de animal adotado não pode ser excluído.", "rascunho-aviso")
+        return redirect(url_for("minha_conta"))
+    if animal["removido_em"] is not None:
+        flash("Este anúncio já foi excluído.", "rascunho-aviso")
+        return redirect(url_for("minha_conta"))
+
+    codigo = None
+    try:
+        # Não repetir: a resposta pode se perder depois do COMMIT.
+        # A RPC decide a autorização e o estado sob bloqueio no banco.
+        g.auth_cliente.rpc("remover_anuncio", {"p_animal_id": str(animal_id)}).execute()
+    except APIError as erro:
+        codigo = erro.code
+    except falhas:
+        pass
+    try:
+        animal = consultar_remocao_propria(animal_id)
+    except falhas:
+        animal = None
+    if animal is not None and animal["removido_em"] is not None:
+        flash("Anúncio excluído com sucesso! Ele foi retirado da plataforma.", "rascunho-sucesso")
+    elif animal is None:
+        flash("O resultado da exclusão é incerto. Confira ‘Meus anúncios’ antes de tentar novamente.",
+              "rascunho-aviso")
+    elif animal["status_adocao"] == "adotado":
+        flash("A exclusão não foi confirmada. Um anúncio de animal adotado não pode ser excluído.",
+              "rascunho-aviso")
+    elif codigo == "55P03":
+        flash("O anúncio está sendo utilizado em outra operação. Aguarde e confira ‘Meus anúncios’ "
+              "antes de tentar novamente.", "rascunho-aviso")
+    else:
+        flash("A exclusão não foi confirmada. Na consulta, o anúncio continua na sua conta. "
               "Confira ‘Meus anúncios’ antes de tentar novamente.", "rascunho-aviso")
     return redirect(url_for("minha_conta"))
 

@@ -48,7 +48,7 @@ class AnunciarTests(unittest.TestCase):
         self.rpc_result = None
         self.final_result = "normal"
         self.result = [dict(id="00000000-0000-0000-0000-000000000010",
-                            usuario_id=self.identity["id"], status_publicacao="rascunho")]
+                            usuario_id=self.identity["id"], status_publicacao="rascunho", removido_em=None)]
 
         def transport(request):
             self.calls.append(request)
@@ -434,6 +434,16 @@ class AnunciarTests(unittest.TestCase):
                 self.assertEqual(len(self.photo_requests()), 5)
                 if failure == "55P03":
                     self.assertIn("Aguarde", page)
+
+    def test_direct_publication_followed_by_removal_does_not_claim_success(self):
+        self.final_result = [dict(self.result[0], status_publicacao="publicado",
+                                  removido_em="2026-11-12T12:00:00+00:00")]
+        response = self.client.post("/anunciar", data=self.publicar_data())
+        page = self.conferir_publicacao(response)
+        self.assertNotIn("Anúncio publicado com sucesso!", page)
+        self.assertIn("anúncio foi excluído", page)
+        self.assertEqual(len(self.publicacoes()), 1)
+        self.assertEqual(len(self.inserts()), 1)
 
     def test_direct_final_read_failure_is_uncertain(self):
         original = self.result[0].copy()

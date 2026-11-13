@@ -33,7 +33,7 @@ class EditarTests(unittest.TestCase):
         self.client.set_cookie("adotae_refresh", "private-refresh")
         self.calls = []
         self.row = dict(id=ANIMAL_ID, usuario_id=self.identity["id"], status_publicacao="rascunho",
-                        status_adocao="disponivel", oculto_admin=False,
+                        status_adocao="disponivel", oculto_admin=False, removido_em=None,
                         nome="Fubá", especie="Outro animal doméstico", especie_outro="Porco doméstico",
                         sexo="Fêmea", idade_aproximada="2 anos", porte="Médio", descricao="Amigável.",
                         distrito="Grussaí", bairro="Centro", email_contato="ana@example.com",
@@ -145,6 +145,8 @@ class EditarTests(unittest.TestCase):
         self.assertEqual(query.url.params["usuario_id"], "eq." + self.identity["id"])
         self.assertEqual(query.url.params["status_publicacao"], "eq.rascunho")
         self.assertEqual(query.url.params["status_adocao"], "eq.disponivel")
+        self.assertEqual(query.url.params["removido_em"], "is.null")
+        self.assertIn("removido_em", query.url.params["select"].split(","))
         self.assertEqual(self.updates(), [])
 
     def test_update_allowlist_filters_jwt_and_confirmation(self):
@@ -212,6 +214,22 @@ class EditarTests(unittest.TestCase):
                 self.assertEqual(response.headers["Cache-Control"], "no-store")
         self.assertEqual(self.updates(), [])
         self.assertEqual(self.client.get("/anuncios/not-a-uuid/editar").status_code, 404)
+
+    def test_removed_draft_get_and_post_return_404_without_form_or_writes(self):
+        data = self.data()
+        self.row["removido_em"] = "2026-11-12T12:00:00+00:00"
+        original = copy.deepcopy(self.row)
+        for method in ("GET", "POST"):
+            with self.subTest(method=method):
+                self.calls.clear()
+                page = self.client.open(URL, method=method, data=data if method == "POST" else None)
+                self.assertEqual(page.status_code, 404)
+                self.assertNotIn(f'action="{URL}"', page.text)
+                self.assertNotIn('>Salvar alterações</button>', page.text)
+                self.assertEqual(page.headers["Cache-Control"], "no-store")
+                self.assertEqual(self.updates(), [])
+                self.assertFalse(any(r.url.path == "/rest/v1/animal_fotos" for r in self.calls))
+                self.assertEqual(self.row, original)
 
     def test_validation_and_limits_preserve_submitted_values(self):
         data = self.data()

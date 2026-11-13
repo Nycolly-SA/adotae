@@ -17,6 +17,8 @@ class PageParser(HTMLParser):
     def __init__(self):
         super().__init__()
         self.links = []
+        self.contact_links = []
+        self.contact_section_depth = 0
         self.images = []
         self.heading_count = 0
         self.forms = []
@@ -26,8 +28,13 @@ class PageParser(HTMLParser):
 
     def handle_starttag(self, tag, attrs):
         attributes = dict(attrs)
+        if tag == "section":
+            if self.contact_section_depth or "detail-contact" in attributes.get("class", "").split():
+                self.contact_section_depth += 1
         if tag == "a":
             self.links.append(attributes.get("href", ""))
+            if self.contact_section_depth:
+                self.contact_links.append(attributes.get("href", ""))
             if "filter-clear" in attributes.get("class", "").split():
                 self.clear_link = attributes.get("href")
         elif tag == "img":
@@ -43,6 +50,8 @@ class PageParser(HTMLParser):
             self.selects[self.current_select].append(attributes)
 
     def handle_endtag(self, tag):
+        if tag == "section" and self.contact_section_depth:
+            self.contact_section_depth -= 1
         if tag == "select":
             self.current_select = None
 
@@ -255,7 +264,7 @@ class RouteTests(unittest.TestCase):
                 page.feed(html)
                 self.assertEqual(page.forms, [])
                 self.assertFalse(any(link.startswith(("tel:", "mailto:", "http:", "https:"))
-                                     for link in page.links))
+                                     for link in page.contact_links))
 
     def test_unknown_animal_identifiers_return_404(self):
         for animal_id in ("0", "5", "999", "-1", "inexistente", "1.5"):

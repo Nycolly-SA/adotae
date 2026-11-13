@@ -344,8 +344,12 @@ from (select op, set_config('storage.operation', op, true) from unnest(array[
 with alteradas as (update public.animal_fotos set estado = 'pendente'
     where estado = 'removendo' returning *)
 select pg_temp.fotos_assert((select count(*) = 0 from alteradas), 'removendo terminal para cliente');
+-- Antes da remoção lógica, a FK recusa DELETE; depois dela, o grant revogado
+-- recusa a própria operação. O roteiro valida ambos os estágios das migrações.
 select pg_temp.fotos_erro(format('delete from public.animais where id = %L',
-    current_setting('adotae.foto_animal_a')), '23503');
+    current_setting('adotae.foto_animal_a')),
+    case when has_table_privilege(current_user, 'public.animais', 'DELETE')
+        then '23503' else '42501' end);
 
 -- B e authenticated sem sub: isolamento simétrico.
 reset role;

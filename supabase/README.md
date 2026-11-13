@@ -1,5 +1,32 @@
 # Banco de dados — etapa SQL
 
+## Remoção lógica — validada em adotae-testes
+
+A migração [202611120001_remover_anuncio.sql](migrations/202611120001_remover_anuncio.sql)
+foi aplicada e validada no Supabase **adotae-testes**, conforme os resultados
+informados no encerramento do checkpoint em 13/11/2026:
+
+- Remoção de rascunhos e anúncios publicados validada.
+- Remoção de anúncios adotados recusada pela RPC `remover_anuncio`.
+- Tentativas de remoção de anúncios de terceiros recusadas com HTTP 403 e código `42501`.
+- Fotografias preservadas e novas autorizações de acesso bloqueadas.
+- Nenhum problema bloqueante identificado nos testes realizados.
+
+A remoção preenche `removido_em`, preserva os registros e objetos armazenados
+e retira o anúncio da listagem e das contagens da interface. O proprietário
+mantém leitura técnica para confirmar a operação. Não há exclusão física,
+restauração pela interface ou limpeza automática de fotos. URLs assinadas já
+emitidas podem funcionar até a expiração; respostas em cache podem continuar
+acessíveis.
+
+Foram informados **322 testes Python aprovados** e **140 testes SQL locais
+aprovados na última execução registrada**. Os
+[testes SQL de remoção](tests/test_remocao_local.py) incluem preservação,
+autorização, visibilidade, bloqueio de alterações e concorrência. A validação
+remota foi funcional e pontual, não uma reexecução integral da suíte SQL local,
+e não certifica o ambiente principal. Nenhuma migração ou operação remota foi
+executada nesta atualização documental.
+
 ## Marcar anúncio como adotado — validada em adotae-testes
 
 A migração [202611100001_marcar_adotado.sql](migrations/202611100001_marcar_adotado.sql)
