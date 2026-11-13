@@ -1,6 +1,9 @@
 import copy
 import json
 import re
+from pathlib import Path
+import subprocess
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -255,6 +258,84 @@ class RemoverTests(unittest.TestCase):
         self.client.set_cookie("adotae_access", jwt(expired=True))
         self.assertIn(SUCESSO, self.submit().text)
         self.assertEqual(self.rpcs()[0].headers["authorization"], "Bearer " + self.access)
+
+    @unittest.skipUnless(Path('C:/Program Files/Google/Chrome/Application/chrome.exe').exists(),
+                         'Chrome local necessário para verificar a confirmação')
+    def test_removal_menu_cancel_and_reopen_require_fresh_confirmation(self):
+        page = self.client.get('/minha-conta').text
+        page = re.sub(r'<link[^>]*>|<script[^>]*>.*?</script>', '', page, flags=re.S)
+        probe = '''
+        (async () => {
+            const results = {};
+            const waitForFocus = async (trigger) => {
+                for (let attempt = 0; attempt < 100; attempt++) {
+                    if (document.activeElement === trigger) return true;
+                    await new Promise(resolve => setTimeout(resolve, 10));
+                }
+                return document.activeElement === trigger;
+            };
+            const menu = document.querySelector('.account-more');
+            results.menuAvailable = !!menu;
+            if (menu) {
+              for (const [selector, field, endpoint] of [
+                  ['.account-removal', 'confirmar_remocao', '/remover'],
+                  ['.account-adoption', 'confirmar_adocao', '/adotar']
+              ]) {
+                menu.open = true;
+                const trigger = menu.querySelector(selector + ' > summary');
+                results[selector + '.available'] = !!trigger;
+                if (!trigger) continue;
+                trigger.focus();
+                trigger.click();
+                const dialog = document.querySelector('dialog[open]');
+                results[selector + '.opensConfirmation'] = !!dialog;
+                if (dialog) {
+                    const form = dialog.querySelector('form');
+                    const checkbox = form.querySelector('[name="' + field + '"]');
+                    let submissions = 0;
+                    form.addEventListener('submit', event => { event.preventDefault(); submissions++; });
+                    form.requestSubmit();
+                    results[selector + '.requiresConfirmation'] = submissions === 0;
+                    checkbox.checked = true;
+                    dialog.querySelector('button[type="button"]').click();
+                    const focusRestored = await waitForFocus(trigger);
+                    results[selector + '.cancelDoesNotSubmit'] = !dialog.open && submissions === 0;
+                    results[selector + '.restoresFocus'] = focusRestored;
+                    trigger.click();
+                    results[selector + '.reopenClearsConfirmation'] = dialog.open && !checkbox.checked;
+                    checkbox.checked = true;
+                    form.requestSubmit();
+                    results[selector + '.confirmedSubmit'] = submissions === 1 && form.method === 'post'
+                        && new URL(form.action).pathname.endsWith(endpoint)
+                        && !!form.querySelector('[name="csrf_token"]');
+                    dialog.close();
+                    await waitForFocus(trigger);
+                }
+              }
+            }
+            document.querySelector('#probe-result').textContent = JSON.stringify(results);
+        })();
+        '''
+        page = page.replace('</body>', '<pre id="probe-result"></pre><script>' +
+                            Path('app/static/js/main.js').read_text(encoding='utf8') + probe + '</script></body>')
+        with tempfile.TemporaryDirectory(prefix='adotae-exclusao-') as temp:
+            path = Path(temp) / 'conta.html'
+            path.write_text(page, encoding='utf8')
+            result = subprocess.run([
+                'C:/Program Files/Google/Chrome/Application/chrome.exe', '--headless',
+                '--disable-gpu', '--disable-background-networking', '--disable-extensions',
+                '--no-first-run', '--no-default-browser-check', '--no-proxy-server',
+                '--host-resolver-rules=MAP * ~NOTFOUND', '--virtual-time-budget=5000',
+                '--user-data-dir=' + str(Path(temp) / 'profile'), '--dump-dom', path.as_uri(),
+            ], capture_output=True, text=True, encoding='utf8', errors='replace', timeout=30)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            output = re.search(r'<pre id="probe-result">(.*?)</pre>', result.stdout, re.S)
+            self.assertIsNotNone(output)
+            results = json.loads(output.group(1))
+            self.assertTrue(results)
+            for behavior, passed in results.items():
+                with self.subTest(behavior=behavior):
+                    self.assertTrue(passed)
 
     def test_second_user_uses_own_session_and_owner_filter(self):
         self.identity = dict(user(), id="00000000-0000-0000-0000-000000000002")

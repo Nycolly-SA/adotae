@@ -1,6 +1,39 @@
 {% extends "base.html" %}
 {% block title %}Minha conta — Adotaê{% endblock %}
 {% block content %}
+{% macro opcoes_anuncio(animal) %}
+<details class="account-more">
+    <summary aria-label="Mais opções para {{ animal.nome }}">Mais opções</summary>
+    <div class="account-more-panel">
+        {% if animal.status_publicacao == 'publicado' %}
+        <details class="account-adoption account-confirmation">
+            <summary>Marcar como adotado</summary>
+            <form class="account-confirmation-form" method="post" action="{{ url_for('adotar_anuncio', animal_id=animal.id) }}">
+                {{ form.csrf_token(id=false) }}
+                <h3 id="titulo-adocao-{{ animal.id }}">Confirmar adoção de {{ animal.nome }}?</h3>
+                <p id="aviso-adocao-{{ animal.id }}">Após confirmar a adoção, o animal deixará de aparecer no catálogo. O anúncio continuará salvo na sua conta e não poderá ser reativado por aqui.</p>
+                <label class="account-adoption-check"><input type="checkbox" name="confirmar_adocao" value="sim" required aria-describedby="aviso-adocao-{{ animal.id }}"> <span>Confirmo que {{ animal.nome }} foi adotado.</span></label>
+                <div class="account-confirmation-buttons">
+                    <button class="button" type="submit" aria-label="Confirmar adoção de {{ animal.nome }}">Confirmar adoção</button>
+                </div>
+            </form>
+        </details>
+        {% endif %}
+        <details class="account-removal account-confirmation">
+            <summary>Excluir anúncio</summary>
+            <form class="account-confirmation-form" method="post" action="{{ url_for('remover_anuncio', animal_id=animal.id) }}">
+                {{ form.csrf_token(id=false) }}
+                <h3 id="titulo-exclusao-{{ animal.id }}">Excluir anúncio de {{ animal.nome }}?</h3>
+                <p id="aviso-exclusao-{{ animal.id }}">O anúncio será retirado da plataforma e não poderá ser recuperado pela interface.</p>
+                <label class="account-adoption-check"><input type="checkbox" name="confirmar_remocao" value="sim" required aria-describedby="aviso-exclusao-{{ animal.id }}"> <span>Confirmo a exclusão do anúncio de {{ animal.nome }}.</span></label>
+                <div class="account-confirmation-buttons">
+                    <button class="button account-button-danger" type="submit" aria-label="Excluir anúncio de {{ animal.nome }}">Excluir anúncio</button>
+                </div>
+            </form>
+        </details>
+    </div>
+</details>
+{% endmacro %}
 <section class="container account-page" aria-labelledby="conta-titulo">
     <div class="account-heading">
         <div>
@@ -66,39 +99,25 @@
                     {% endif %}
                     {% if animal.status_adocao != 'adotado' and animal.status_publicacao == 'rascunho' %}
                     <p class="account-animal-note">Para publicar, o anúncio precisa de pelo menos um contato e uma fotografia pronta.</p>
-                    <div class="account-animal-actions">
+                    <div class="account-animal-actions account-animal-actions--draft">
                         <a class="text-link" href="{{ url_for('editar_anuncio', animal_id=animal.id) }}">Editar dados</a>
+                        <div class="account-actions-end">
                         <form method="post" action="{{ url_for('publicar_anuncio', animal_id=animal.id) }}">
                             {{ form.csrf_token(id=false) }}
                             <button class="button" type="submit" aria-label="Publicar anúncio de {{ animal.nome }}">Publicar</button>
                         </form>
+                        {{ opcoes_anuncio(animal) }}
+                        </div>
                     </div>
                     {% elif animal.status_publicacao == 'publicado' and animal.status_adocao == 'disponivel' %}
-                    <div class="account-animal-actions">
+                    <div class="account-animal-actions account-animal-actions--published">
                         {% if not animal.oculto_admin %}
                         <a class="button account-button-secondary" href="{{ url_for('animal_detalhes_publico', animal_id=animal.id) }}">Ver anúncio</a>
                         {% endif %}
-                        <details class="account-adoption">
-                            <summary>Marcar como adotado</summary>
-                            <form class="account-adoption-form" method="post" action="{{ url_for('adotar_anuncio', animal_id=animal.id) }}">
-                                {{ form.csrf_token(id=false) }}
-                                <p id="aviso-adocao-{{ animal.id }}">Após confirmar a adoção, o animal deixará de aparecer no catálogo. O anúncio continuará salvo na sua conta e não poderá ser reativado por aqui.</p>
-                                <label class="account-adoption-check"><input type="checkbox" name="confirmar_adocao" value="sim" required aria-describedby="aviso-adocao-{{ animal.id }}"> <span>Confirmo que {{ animal.nome }} foi adotado.</span></label>
-                                <button class="button" type="submit" aria-label="Confirmar adoção de {{ animal.nome }}">Confirmar adoção</button>
-                            </form>
-                        </details>
+                        <div class="account-actions-end">
+                        {{ opcoes_anuncio(animal) }}
+                        </div>
                     </div>
-                    {% endif %}
-                    {% if animal.status_adocao == 'disponivel' and animal.status_publicacao in ['rascunho', 'publicado'] %}
-                    <details class="account-adoption">
-                        <summary>Excluir</summary>
-                        <form class="account-adoption-form" method="post" action="{{ url_for('remover_anuncio', animal_id=animal.id) }}">
-                            {{ form.csrf_token(id=false) }}
-                            <p id="aviso-exclusao-{{ animal.id }}">O anúncio será retirado da plataforma e não poderá ser recuperado pela interface.</p>
-                            <label class="account-adoption-check"><input type="checkbox" name="confirmar_remocao" value="sim" required aria-describedby="aviso-exclusao-{{ animal.id }}"> <span>Confirmo a exclusão do anúncio de {{ animal.nome }}.</span></label>
-                            <button class="button" type="submit" aria-label="Excluir anúncio de {{ animal.nome }}">Excluir</button>
-                        </form>
-                    </details>
                     {% endif %}
                     </div>
                 </li>

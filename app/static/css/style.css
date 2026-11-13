@@ -241,13 +241,28 @@ h1, h2 { font-family: var(--heading-font); font-weight: 400; letter-spacing: -.0
 .account-page .account-animal-actions .button { min-height: 44px; padding: 8px 16px; }
 .account-page .account-button-secondary { border: 1px solid var(--green); background: transparent; color: var(--green); }
 .account-page .account-button-secondary:hover { background: var(--sage-light); }
-.account-adoption { min-width: 0; max-width: 100%; }
-.account-adoption[open] { flex-basis: 100%; }
-.account-adoption summary { width: fit-content; min-height: 44px; padding-block: 10px; color: var(--green); font-size: 1rem; font-weight: 600; text-decoration: underline; text-underline-offset: 5px; cursor: pointer; }
-.account-adoption-form { margin-top: 8px; padding: 20px; background: var(--sage-light); border-radius: 8px; font-size: 1rem; }
 .account-adoption-check { display: flex; align-items: center; gap: 12px; min-height: 44px; margin-bottom: 16px; cursor: pointer; }
 .account-adoption-check input { flex-shrink: 0; width: 20px; height: 20px; margin: 0; accent-color: var(--green); }
-.account-adoption summary:focus-visible, .account-adoption-check input:focus-visible { outline: 3px solid var(--green); outline-offset: 5px; }
+.account-adoption-check input:focus-visible { outline: 3px solid var(--green); outline-offset: 5px; }
+.account-actions-end { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px 24px; margin-left: auto; min-width: 0; }
+.account-more { position: relative; flex-shrink: 0; }
+.account-more > summary { display: flex; align-items: center; min-height: 44px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 8px; list-style: none; cursor: pointer; font-weight: 600; }
+.account-more > summary::-webkit-details-marker, .account-confirmation > summary::-webkit-details-marker { display: none; }
+.account-more[open] > summary { background: var(--sage-light); }
+.account-more summary:focus-visible { outline: 3px solid var(--green); outline-offset: 5px; }
+.account-more-panel { position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 3; width: min(420px, calc(100vw - 80px)); padding: 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); box-shadow: 0 8px 24px rgb(47 74 67 / 12%); }
+.account-more.is-enhanced .account-more-panel { width: 200px; }
+.account-confirmation > summary { min-height: 44px; padding: 8px 12px; list-style: none; color: var(--green); cursor: pointer; }
+.account-confirmation > summary:hover { background: var(--sage-light); border-radius: 4px; }
+.account-adoption + .account-removal { border-top: 1px solid var(--border); margin-top: 6px; padding-top: 6px; }
+.account-removal > summary { color: #A12D32; }
+.account-confirmation-form { padding: 12px; }
+.account-confirmation-form h3 { margin: 0 0 16px; font: 400 26px/1.3 var(--heading-font); }
+.account-confirmation-dialog { width: min(480px, calc(100% - 32px)); max-height: calc(100% - 32px); padding: 16px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); color: var(--text); }
+.account-confirmation-dialog::backdrop { background: rgb(20 44 38 / 45%); }
+.account-confirmation-buttons { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 12px; }
+.account-page .account-button-danger { background: #A12D32; }
+.account-page .account-button-danger:hover { background: #842329; }
 .account-logout { padding-top: 16px; border-top: 1px solid var(--border); }
 .account-logout button { padding: 0 4px; border: 0; background: transparent; text-decoration: underline; text-underline-offset: 5px; cursor: pointer; font-size: 1rem; }
 @media (max-width: 1024px) {
@@ -289,9 +304,18 @@ h1, h2 { font-family: var(--heading-font); font-weight: 400; letter-spacing: -.0
     .account-animals h3 { font-size: 23px; }
     .account-thumbnail { grid-row: 1; width: 80px; }
     .account-animal-footer { grid-column: 1 / -1; padding-top: 16px; }
-    .account-adoption summary { margin-inline: auto; text-align: center; }
-    .account-adoption[open] summary { margin-left: 0; }
-    .account-adoption-form { padding: 16px; }
+    .account-actions-end { width: 100%; flex-direction: column; align-items: stretch; margin-left: 0; gap: 8px; }
+    .account-page .account-actions-end > form .button { width: 100%; min-height: 48px; }
+    .account-more { align-self: flex-end; }
+    .account-page .account-animal-actions--published { flex-direction: row; flex-wrap: nowrap; gap: 12px; }
+    .account-page .account-animal-actions--published > .button { flex: 1; min-width: 0; width: auto; padding-inline: 10px; font-size: .875rem; }
+    .account-animal-actions--published > .account-actions-end { flex-shrink: 0; width: auto; margin-left: auto; }
+    .account-animal-actions .account-more > summary { min-height: 48px; padding-inline: 8px; font-size: .875rem; }
+    .account-animal-actions--draft > .account-actions-end { flex-direction: row; flex-wrap: nowrap; gap: 12px; }
+    .account-animal-actions--draft .account-actions-end > form { flex: 1; min-width: 0; }
+    .account-page .account-animal-actions--draft .account-actions-end > form .button { padding-inline: 10px; font-size: .875rem; }
+    .account-confirmation-buttons { flex-direction: column; }
+    .account-page .account-confirmation-buttons .button { width: 100%; }
     .container { width: calc(100% - 40px); }
     .header-inner { min-height: 84px; flex-wrap: wrap; gap: 0 20px; padding-block: 15px; }
     .brand { font-size: 24px; }

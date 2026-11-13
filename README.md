@@ -22,7 +22,14 @@ O fluxo de confirmação pela rota `/auth/confirm` foi validado manualmente: o s
 
 Em `/login`, usuários com e-mail confirmado podem entrar. A sessão permanece entre requisições, com renovação dos tokens expirados quando possível. `/minha-conta` exige autenticação e apresenta uma saudação e o botão “Sair”, que envia um POST protegido por CSRF. A navegação oferece “Entrar” ou “Minha conta” conforme a identidade validada. A listagem dos próprios anúncios já funciona em `/minha-conta`; edição de anúncios publicados, recuperação de senha e edição de perfil continuam pendentes.
 
-Em “Meus anúncios”, “Excluir” permite remover logicamente rascunhos e anúncios
+Em “Meus anúncios”, “Publicar” permanece visível nos rascunhos. Nos anúncios
+publicados disponíveis, “Mais opções” oferece “Marcar como adotado”, com confirmação
+em janela, aviso de que o anúncio sairá do catálogo e confirmação explícita.
+O status permanece no cabeçalho do cartão.
+
+“Mais opções” no rodapé do cartão também oferece “Excluir anúncio”,
+com confirmação em uma janela (ou no próprio menu quando JavaScript não está disponível).
+A ação permite remover logicamente rascunhos e anúncios
 publicados disponíveis, após aviso e confirmação explícita. O POST
 `/anuncios/<uuid>/remover` usa CSRF e somente o cliente autenticado para chamar
 `remover_anuncio`. O sucesso exige nova leitura própria com `removido_em`

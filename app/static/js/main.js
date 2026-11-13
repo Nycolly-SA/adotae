@@ -70,6 +70,48 @@ document.querySelectorAll('.account-thumbnail img').forEach((image) => {
     if (image.complete && image.naturalWidth === 0) showPlaceholder();
 });
 
+// Sem suporte a dialog, a confirmação continua disponível no próprio menu.
+document.querySelectorAll('.account-more .account-confirmation').forEach((confirmation) => {
+    const menu = confirmation.closest('.account-more');
+    const trigger = confirmation.querySelector('summary');
+    const form = confirmation.querySelector('form');
+    const dialog = document.createElement('dialog');
+    if (typeof dialog.showModal !== 'function') return;
+
+    dialog.className = 'account-confirmation-dialog';
+    dialog.setAttribute('aria-labelledby', form.querySelector('h3').id);
+    dialog.setAttribute('aria-describedby', form.querySelector('p').id);
+    const cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.className = 'button account-button-secondary';
+    cancel.textContent = 'Cancelar';
+    cancel.autofocus = true;
+    form.querySelector('.account-confirmation-buttons').prepend(cancel);
+    dialog.append(form);
+    menu.closest('.account-page').append(dialog);
+    menu.classList.add('is-enhanced');
+
+    trigger.addEventListener('click', (event) => {
+        event.preventDefault();
+        form.querySelector('input[type="checkbox"]').checked = false;
+        dialog.showModal();
+    });
+    cancel.addEventListener('click', () => dialog.close());
+    dialog.addEventListener('close', () => trigger.focus());
+});
+
+document.addEventListener('click', (event) => {
+    if (event.target.closest('.account-more, .account-confirmation-dialog')) return;
+    document.querySelectorAll('.account-more[open]').forEach((menu) => { menu.open = false; });
+});
+document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape' || document.querySelector('.account-confirmation-dialog[open]')) return;
+    document.querySelectorAll('.account-more[open]').forEach((menu) => {
+        menu.open = false;
+        menu.querySelector('summary').focus();
+    });
+});
+
 const menuButton = document.querySelector('.menu-toggle');
 const navigation = document.querySelector('#navegacao');
 const mobileViewport = window.matchMedia('(max-width: 640px)');
