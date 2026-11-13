@@ -30,6 +30,10 @@ class DetalhesPublicosTests(unittest.TestCase):
         self.assertEqual(response.headers.get("Referrer-Policy"), "no-referrer")
         return response
 
+    def test_public_details_display_unidentified_sex(self):
+        self.row["sexo"] = "Não identificado"
+        self.assertIn("<dd>Não identificado</dd>", self.details().text)
+
     def test_public_details_and_exact_anonymous_query(self):
         self.row.update(bairro="Centro", descricao="Descrição completa.\nSegunda linha.")
         response = self.details()

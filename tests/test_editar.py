@@ -149,6 +149,14 @@ class EditarTests(unittest.TestCase):
         self.assertIn("removido_em", query.url.params["select"].split(","))
         self.assertEqual(self.updates(), [])
 
+    def test_edit_preserves_unidentified_sex(self):
+        self.row["sexo"] = "Não identificado"
+        page = self.client.get(URL)
+        self.assertIn('selected value="Não identificado"', page.text)
+        response = self.client.post(URL, data=self.data(especie="Ave", sexo="Não identificado"))
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(json.loads(self.updates()[0].content)["sexo"], "Não identificado")
+
     def test_update_allowlist_filters_jwt_and_confirmation(self):
         catalog = self.client.get("/animais").text
         animals = copy.deepcopy(ANIMAIS)

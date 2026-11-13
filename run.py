@@ -884,7 +884,7 @@ def validar_catalogo(registros):
     """Recusa respostas incompletas e limita os dados enviados ao template."""
     if not isinstance(registros, list):
         raise ValueError("Resposta de catálogo inválida")
-    limites = dict(id=36, nome=100, especie=30, sexo=5, idade_aproximada=50,
+    limites = dict(id=36, nome=100, especie=30, sexo=16, idade_aproximada=50,
                    porte=7, descricao=2000, distrito=30)
     animais = []
     for registro in registros:
@@ -898,7 +898,7 @@ def validar_catalogo(registros):
         if (registro["especie"] not in OPCOES_FILTROS["tipo"]
                 or registro["porte"] not in OPCOES_FILTROS["porte"]
                 or registro["distrito"] not in OPCOES_FILTROS["distrito"]
-                or registro["sexo"] not in ("Macho", "Fêmea")):
+                or registro["sexo"] not in ("Macho", "Fêmea", "Não identificado")):
             raise ValueError("Opções de catálogo inválidas")
         animais.append({campo: registro[campo] for campo in limites})
     return animais

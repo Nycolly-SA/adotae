@@ -129,6 +129,7 @@ class FotosSQLLocal(unittest.TestCase):
         if cls.fotos_before != cls.fotos_metadata():
             raise AssertionError('Publicação alterou metadados/permissões das fotografias')
         cls.execute((ROOT / "supabase/migrations/202611080003_fotos_publicas_assinatura.sql").read_text(encoding="utf-8"))
+        cls.execute((ROOT / "supabase/migrations/202611130001_sexo_nao_identificado.sql").read_text(encoding="utf-8"))
         cls.storage_before = cls.storage_policy_metadata()
         cls.fotos_before = cls.fotos_metadata()
 
@@ -179,6 +180,17 @@ class FotosSQLLocal(unittest.TestCase):
             f"{literal(bucket)},{literal(path or self.path)},{literal(owner)},"
             f"{literal(json.dumps(metadata))}::jsonb);"
         )
+
+    def test_sexo_nao_identificado_e_valores_invalidos(self):
+        self.run_case(claims() + f"""
+        update public.animais set sexo='Não identificado' where id='{self.animal}';
+        select pg_temp.check_true((select sexo='Não identificado' from public.animais where id='{self.animal}'));
+        select pg_temp.expect_error('update public.animais set sexo=''Outro'' where id=''{self.animal}''','23514');
+        select pg_temp.expect_error('update public.animais set sexo=null where id=''{self.animal}''','23502');
+        insert into public.animais(nome,especie,sexo,idade_aproximada,porte,descricao,distrito)
+        values ('Ave de teste','Ave','Não identificado','1 ano','Pequeno','Teste local','Atafona');
+        select pg_temp.check_true((select count(*)=2 from public.animais where sexo='Não identificado'));
+        """)
 
     def confirmar(self):
         return f"select public.confirmar_foto('{self.foto}');"

@@ -67,7 +67,8 @@ class AnimalForm(FlaskForm):
     especie_outro = StringField("Qual outro animal doméstico?", filters=[limpar_opcional],
                                 validators=[Optional(), Length(max=60, message="Use até 60 caracteres.")],
                                 render_kw={"maxlength": 60})
-    sexo = SelecaoAnimal("Sexo", choices=[("", "Selecione o sexo"), ("Macho", "Macho"), ("Fêmea", "Fêmea")],
+    sexo = SelecaoAnimal("Sexo", choices=[("", "Selecione o sexo"), ("Macho", "Macho"), ("Fêmea", "Fêmea"),
+                                       ("Não identificado", "Não identificado")],
                        validators=[DataRequired(message="Selecione o sexo.")])
     idade_aproximada = StringField("Idade aproximada", filters=[limpar_texto], validators=[
         DataRequired(message="Informe a idade aproximada."),

@@ -1,5 +1,19 @@
 # Banco de dados — etapa SQL
 
+## Sexo não identificado — aplicação remota pendente
+
+A migração [202611130001_sexo_nao_identificado.sql](migrations/202611130001_sexo_nao_identificado.sql)
+amplia a regra de `animais.sexo` para aceitar `Macho`, `Fêmea` e `Não identificado`.
+O campo continua obrigatório; registros, RLS e permissões são preservados.
+O formulário de cadastro/edição e a validação do catálogo aceitam a nova opção.
+
+Aplicar o arquivo completo no SQL Editor de cada projeto Supabase que recebe
+anúncios, antes de usar a nova opção. Não reaplicar a migração inicial.
+Esta alteração ainda não foi aplicada nem validada no Supabase remoto.
+Validação local: a suíte SQL de remoção, que inclui as regressões das migrações
+anteriores, passou com 54 testes. O teste novo confirma INSERT/UPDATE com
+`Não identificado` e rejeição de valores inválidos ou nulos.
+
 ## Remoção lógica — validada em adotae-testes
 
 A migração [202611120001_remover_anuncio.sql](migrations/202611120001_remover_anuncio.sql)
@@ -741,7 +755,8 @@ corrigir permissões.
 - UUID gerado pelo PostgreSQL; proprietário obrigatório, com FK para
   `auth.users(id)` e valor padrão `auth.uid()`. A aplicação omite esse campo.
 - `especie`, `porte` e `distrito` usam exatamente os valores de `OPCOES_FILTROS`
-  em `run.py`; `sexo` admite `Macho` e `Fêmea`, como os dados demonstrativos.
+  em `run.py`; a migração inicial admite `Macho` e `Fêmea` em `sexo`.
+  A migração de 13/11 acrescenta `Não identificado`.
   O parâmetro GET `tipo` corresponde à coluna `especie`. Os identificadores
   inteiros demonstrativos não são migrados.
 - `idade_aproximada` é texto, compatível com “6 meses” e “2 anos”; corresponde

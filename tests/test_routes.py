@@ -406,6 +406,12 @@ class RouteTests(unittest.TestCase):
             self.assertNotIn(value, response.text)
         return response
 
+    def test_catalog_displays_unidentified_sex(self):
+        self.rows[0]["sexo"] = "Não identificado"
+        response = self.client.get("/animais")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("<dd>Não identificado</dd>", response.text)
+
     def test_api_failures_do_not_look_like_empty_catalog(self):
         for failure in (401, 403, 500, "network", "invalid-json"):
             with self.subTest(failure=failure):

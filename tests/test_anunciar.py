@@ -339,6 +339,12 @@ class AnunciarTests(unittest.TestCase):
         self.assertIn("Anúncio publicado com sucesso!", self.conferir_publicacao(response))
         self.assertNotIn("Anúncio publicado com sucesso!", self.client.get("/minha-conta").text)
 
+    def test_direct_publication_accepts_unidentified_sex(self):
+        response = self.client.post("/anunciar", data=self.publicar_data(
+            especie="Ave", sexo="Não identificado"))
+        self.assertIn("Anúncio publicado com sucesso!", self.conferir_publicacao(response))
+        self.assertEqual(json.loads(self.inserts()[0].content)["sexo"], "Não identificado")
+
     def test_direct_publication_accepts_whatsapp_without_email(self):
         response = self.client.post("/anunciar", data=self.publicar_data(
             email_contato="", whatsapp="+55 (22) 99999-9999"))
