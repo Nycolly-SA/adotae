@@ -1,15 +1,30 @@
-# Banco de dados — etapa SQL
+# Banco de dados e segurança — Adotaê
 
-## Sexo não identificado — aplicação remota pendente
+## Situação atual da entrega
+
+Conforme confirmado pelo responsável pelo projeto, as migrações deste repositório
+foram aplicadas no Supabase principal, incluindo a opção de sexo `Não identificado`.
+A aplicação está publicada na Vercel, conectada ao principal, e os fluxos principais
+foram testados manualmente. O Flask implementa catálogo e detalhes com fotografias,
+autenticação, rascunhos, publicação, registro de adoção e remoção lógica.
+
+As seções abaixo preservam o histórico técnico das etapas e os resultados de
+`adotae-testes`. Contagens, auditorias e cenários pontuais referem-se aos ambientes
+e às execuções indicados; os testes manuais na Vercel não comprovam a reexecução
+integral desses roteiros no principal. Nenhuma migração, teste remoto ou auditoria
+do Supabase foi executado nesta revisão documental.
+
+## Sexo não identificado — aplicada no principal
 
 A migração [202611130001_sexo_nao_identificado.sql](migrations/202611130001_sexo_nao_identificado.sql)
 amplia a regra de `animais.sexo` para aceitar `Macho`, `Fêmea` e `Não identificado`.
 O campo continua obrigatório; registros, RLS e permissões são preservados.
 O formulário de cadastro/edição e a validação do catálogo aceitam a nova opção.
 
-Aplicar o arquivo completo no SQL Editor de cada projeto Supabase que recebe
-anúncios, antes de usar a nova opção. Não reaplicar a migração inicial.
-Esta alteração ainda não foi aplicada nem validada no Supabase remoto.
+A aplicação desta migração no Supabase principal foi confirmada pelo responsável.
+Não há resultado específico adicional registrado para essa opção no serviço remoto.
+Em novas instalações, aplicar as migrações em ordem antes de usar a nova opção;
+não reaplicar a migração inicial em ambientes já configurados.
 Validação local: a suíte SQL de remoção, que inclui as regressões das migrações
 anteriores, passou com 54 testes. O teste novo confirma INSERT/UPDATE com
 `Não identificado` e rejeição de valores inválidos ou nulos.
@@ -49,7 +64,9 @@ em 10/11/2026**, conforme os resultados informados das 12 verificações reais
 registradas na seção de diagnóstico de adoção abaixo. A operação foi realizada
 pela Data API, com URL e chave publicável de adotae-testes e contas fictícias,
 **sem utilização de `service_role`**. Essa validação não certifica o projeto
-principal. **A interface Flask ainda não implementa a ação de marcar como adotado.**
+principal. A interface Flask já implementa a ação de marcar como adotado,
+com autenticação, proteção CSRF e confirmação explícita; a validação manual dos
+fluxos principais na Vercel foi confirmada separadamente na situação atual acima.
 
 A RPC `public.marcar_adotado(p_animal_id uuid)` retorna `void` e permite somente
 ao proprietário autenticado, identificado por `auth.uid()`, mudar seu anúncio
@@ -114,8 +131,9 @@ A migração [202611080003_fotos_publicas_assinatura.sql](migrations/20261108000
 requer todas as anteriores. Mantém o bucket `animal-fotos` privado e não altera
 grants globais de Storage, funções privilegiadas, interface ou operações do dono.
 Foi validada no serviço Storage real do Supabase **adotae-testes em 09/11/2026**,
-conforme os resultados informados da execução. **O ambiente principal ainda não
-recebeu validação desta funcionalidade.**
+conforme os resultados informados da execução. No principal, a aplicação das
+migrações e os testes manuais dos fluxos principais na Vercel foram confirmados
+separadamente; não há registro de repetição integral deste diagnóstico nesse ambiente.
 
 Para `anon`, concede somente SELECT de `id`, `animal_id` e `estado` em
 `animal_fotos`. `id`/`animal_id` identificam a reserva e compõem o caminho com
@@ -185,8 +203,8 @@ usados pelo servidor conforme o [controle de acesso](https://supabase.com/docs/g
 `storage.operation` é contexto confiável do serviço, não prova de origem para
 clientes com acesso SQL arbitrário.
 
-Na integração futura, o Flask poderá solicitar URLs com `expiresIn=60`
-(60 segundos). Esse prazo será uma escolha da aplicação: `expiresIn` é definido
+Na integração atual, o Flask solicita URLs com validade de 60 segundos.
+Esse prazo é uma escolha da aplicação: `expiresIn` é definido
 por quem solicita a URL, e a RLS atual não estabelece um prazo máximo. Visitantes
 podem chamar a API diretamente e solicitar outros prazos aceitos pelo Storage.
 Ocultar um anúncio impede novas assinaturas, mas não revoga URLs existentes,
@@ -197,7 +215,8 @@ o MVP acadêmico, sem garantia de revogação imediata.
 ## Publicação direta — validada em adotae-testes
 
 A migração [202611080002_publicar_anuncio.sql](migrations/202611080002_publicar_anuncio.sql)
-acrescenta `public.publicar_anuncio(p_animal_id uuid)`, sem botão ou rota Flask.
+acrescenta `public.publicar_anuncio(p_animal_id uuid)`. A publicação já está
+integrada ao Flask, tanto no cadastro quanto na ação de publicar um rascunho.
 Foi aplicada com sucesso no Supabase **adotae-testes em 08/11/2026**,
 com as verificações de instalação e permissões da RPC aprovadas, conforme os
 resultados informados. Em novas instalações, executar somente após as migrações
@@ -289,7 +308,7 @@ catálogo ou leitura pública de fotos foi implementada nesta etapa.
 A migração [202611080001_protect_animais_edicao.sql](migrations/202611080001_protect_animais_edicao.sql)
 foi aplicada com sucesso no Supabase **adotae-testes em 08/11/2026**.
 As verificações de privilégios e de ativação do trigger foram aprovadas.
-**Ainda não foi aplicada no projeto Supabase principal.**
+A aplicação no Supabase principal também foi confirmada pelo responsável.
 Mantém a RLS de propriedade e os campos editáveis dos rascunhos, revoga UPDATE
 de `status_adocao` para `authenticated` e aborta se grants de tabela, PUBLIC ou
 papéis herdados ainda permitirem UPDATE efetivo em campos protegidos.
@@ -424,8 +443,9 @@ Na execução real posteriormente informada, upload, primeira e segunda confirma
 da RPC e conferência da reserva passaram. `download_proprio` falhou com
 `StorageApiError`, HTTP 404, código `not_found`. A limpeza foi concluída e
 conferida: **0 animais, 0 reservas e 0 arquivos no bucket**. O fluxo completo de
-Storage ainda não havia sido aprovado naquela execução. Não há processamento,
-integração Flask ou acesso público a fotografias. Não extrapolar esses resultados
+Storage ainda não havia sido aprovado naquela execução. Naquela etapa, não havia
+processamento, integração Flask ou acesso público a fotografias, hoje implementados.
+Não extrapolar os resultados daquela execução
 para o projeto principal.
 
 ### Hipótese do download e migração corretiva proposta
@@ -450,7 +470,9 @@ O sucesso da RPC confirma suas verificações naquele instante; não prova leitu
 pela sessão, pois a consulta ao catálogo ocorre na auxiliar `SECURITY DEFINER`.
 
 A nova [202611070001_fix_animal_fotos_storage_leitura.sql](migrations/202611070001_fix_animal_fotos_storage_leitura.sql)
-é uma proposta de compatibilidade com a leitura documentada, **não aplicada**.
+foi proposta para compatibilidade com a leitura documentada. Sua aplicação no
+principal está incluída na confirmação das migrações da entrega. O histórico
+abaixo descreve a investigação e o plano de validação daquela etapa.
 Usa `ALTER POLICY` exclusivamente no `USING` de `animal_fotos_storage_leitura`:
 troca o filtro de operação de `pronta` por `allow_any_operation` com as duas
 operações. Preserva `RESTRICTIVE`, SELECT, papel `authenticated`, proprietário
@@ -716,19 +738,26 @@ com bucket privado e sessões reais A/B (sem chave privilegiada nas chamadas):
    sem endpoint para `adotae_private`, e repetir a auditoria de grants efetivos.
    Testar confirmação versus remoção concorrentes no serviço real.
 
-As seções seguintes registram o histórico da etapa de **animais**; aprovações
-remotas e contagens anteriores não se aplicam à validação real do Storage.
+As seções seguintes registram o histórico da migração inicial de **animais**,
+anterior às integrações de fotografias, publicação, adoção e remoção lógica.
+As permissões e limitações descritas nesse histórico foram alteradas pelas
+migrações posteriores, documentadas acima. Aprovações remotas e contagens
+anteriores não se aplicam à validação real do Storage.
 
 O arquivo [202611010001_create_animais.sql](migrations/202611010001_create_animais.sql)
 cria `public.animais` no Supabase PostgreSQL. A migração foi aplicada em
-`adotae-testes` e no projeto principal. O catálogo agora consulta os anúncios
+`adotae-testes` e no projeto principal. Naquela etapa, o catálogo consultava os anúncios
 públicos com cliente anônimo e filtros explícitos, sem contatos, proprietário
 ou fotografias. A integração Flask foi validada offline com SDK real e HTTP
 simulado; não houve nova migração, mudança de RLS ou validação remota nesta etapa.
 Os resultados remotos abaixo vêm do histórico informado; nesta revisão não
 foram executados SQL nem acessos ao Supabase.
 
-## Estado dos ambientes
+## Estado dos ambientes — histórico da migração inicial
+
+A tabela registra as verificações daquela etapa. A aplicação posterior das demais
+migrações no principal e os testes manuais na Vercel constam na situação atual da
+entrega, sem atribuir a eles as auditorias e contagens históricas abaixo.
 
 | Verificação | `adotae-testes` | Principal |
 | --- | --- | --- |
@@ -764,7 +793,7 @@ corrigir permissões.
 - Nome, espécie, sexo, idade, porte, descrição e distrito são obrigatórios
   inclusive no rascunho: decisão confirmada, sem salvamento parcialmente
   preenchido. Contatos e fotos podem ser adicionados posteriormente, antes da
-  publicação; fotos ainda não são implementadas. Texto obrigatório ou opcional
+  publicação; o envio de fotos já está implementado no Flask. Texto obrigatório ou opcional
   preenchido não pode ser vazio nem conter apenas espaços. Campos opcionais
   ausentes devem ser `NULL`.
 - Limites máximos, medidos em caracteres por `char_length`: `nome` 100,
@@ -794,7 +823,13 @@ corrigir permissões.
 - A FK mantém `NO ACTION`: excluir uma conta com anúncios será bloqueado.
   Exclusão em cascata e retenção de dados precisam de decisão futura.
 
-## Permissões e limites
+## Permissões e limites — histórico da migração inicial
+
+As regras abaixo descrevem a migração inicial e sua proteção de edição. No estado
+atual, a publicação e a adoção ocorrem por RPCs próprias; a migração de remoção
+revoga DELETE de `authenticated` e usa `remover_anuncio` para a exclusão lógica.
+Anúncios removidos deixam de ser públicos e não podem ser editados; o dono mantém
+leitura técnica para confirmar a remoção. Anúncios adotados não podem ser removidos.
 
 As políticas SELECT são permissivas e se somam: visitantes veem somente
 publicados, disponíveis e não ocultos; autenticados veem também todos os próprios.
@@ -848,7 +883,7 @@ Os testes foram executados em **blocos SQL independentes com `ROLLBACK`**.
 **Não houve execução integral de `tests/animais_rls.sql`.** A auditoria de 11
 verificações faz parte dos testes manuais relatados; não é uma contagem de
 asserções automatizadas do arquivo. Nenhum teste SQL foi repetido nesta revisão.
-Nesta revisão, passaram 74 testes automatizados locais (70 no histórico anterior),
+Na revisão daquela etapa, passaram 74 testes automatizados locais (70 no histórico anterior),
 incluindo
 [os testes offline do roteiro Python](../tests/test_validacao_data_api.py).
 Esses testes não validam SQL, RLS instalada ou acesso real pela Data API.
@@ -890,7 +925,7 @@ simular claims; a aplicação não deve abrir conexão SQL privilegiada nem acei
 claims enviados pelo cliente. A validação complementar com chave publicável,
 sessões reais de A/B e visitante já foi aprovada em `adotae-testes`.
 
-## Resultado da revisão estática
+## Resultado da revisão estática — histórico da migração inicial
 
 - Não foi identificado defeito crítico na migração por leitura estática. As duas
   políticas SELECT se somam, enquanto UPDATE/DELETE continuam limitados ao dono;
@@ -913,12 +948,12 @@ sessões reais de A/B e visitante já foi aprovada em `adotae-testes`.
   usados manualmente precisam preparar seu próprio contexto e fixtures; não basta
   executar trechos arbitrários do arquivo. A revisão não certifica sua execução integral.
 
-## Pendências por prioridade
+## Limites de validação e pontos em aberto
 
-1. **Alta — validar escrita autenticada pela Data API no principal.** A leitura
-   anônima e a auditoria não substituem testes com dois usuários distintos para
-   operações próprias, isolamento e campos protegidos. O roteiro Python deste
-   repositório é exclusivo de `adotae-testes`, não do principal.
+1. **Validação do principal:** os fluxos principais já foram testados manualmente
+   na Vercel. Não há registro de repetição integral dos roteiros de isolamento
+   entre dois usuários e de campos protegidos nesse ambiente. O roteiro Python
+   deste repositório é exclusivo de `adotae-testes`, não do principal.
 2. **Média — completar cenários da API não cobertos pelo roteiro Python.** JWT
    inválido/expirado, leitura de anúncios publicados e demais constraints pela
    API não são cenários desse script. Os testes SQL manuais de constraints e
@@ -935,15 +970,12 @@ sessões reais de A/B e visitante já foi aprovada em `adotae-testes`.
    não equivale a essa execução controlada. Os cenários manuais aprovados continuam
    registrados separadamente.
 
-Essas pendências não exigem novas funcionalidades para concluir a revisão SQL.
-Fotos, publicação e administração pertencem às próximas etapas e não são condições
-para manter esta base já aplicada, desde que a publicação continue bloqueada.
+Fotos/Storage, validação dos contatos e verificação de e-mail na publicação já
+estão integrados ao Flask. Administração pela interface e exclusão de contas
+permanecem fora da implementação entregue.
 
-Pendências de integração futura:
+Observação sobre o escopo local:
 
-- Validar formatos de contato na interface.
-- Projetar fotos/Storage, verificação de e-mail na publicação, autorização
-  administrativa confiável e política de exclusão de contas posteriormente.
 - O escopo local ainda descreve provedores e autenticação como pendentes;
   README e código já usam Supabase Auth. Esta preparação adota Supabase conforme
   a solicitação, sem reescrever esse documento local ignorado pelo Git.
@@ -1337,12 +1369,11 @@ não comprova invalidação de URLs já emitidas nem de caches. A comparação a
 as duas fixtures e suas fotos, sem acesso a outras linhas, metadados internos
 de `storage.objects`, `xmin` ou `ctid`.
 
-**Verificação Flask separada:** continuam pendentes a ação de marcar como
-adotado, sua autorização/CSRF, as mensagens e a atualização da interface após
-a adoção. Catálogo e detalhes já existentes requerem conferência HTTP/browser
-separada; as etapas 9–10 acima validam as consultas pela Data API, não as páginas
-Flask. Este script não implementa interface nem declara essas verificações
-aprovadas.
+**Verificação Flask separada:** a ação de marcar como adotado já está implementada,
+com autenticação, proteção CSRF, mensagens e atualização da listagem após a adoção.
+Os fluxos principais foram testados manualmente na Vercel, conforme a confirmação
+registrada no início deste documento. As etapas 9–10 acima validam consultas pela
+Data API, não as páginas Flask; este script não comprova o comportamento da interface.
 
 Verificação exclusivamente offline do roteiro:
 
