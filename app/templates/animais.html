@@ -42,7 +42,7 @@
                 {% else %}
                 <p>Fotografia temporariamente indisponível</p>
                 {% endif %}
-                <span class="species-tag">{{ animal.especie }}</span>
+                <span class="species-tag">{{ animal.especie_outro if animal.especie == 'Outro animal doméstico' and animal.especie_outro else animal.especie }}</span>
             </div>
             <div class="card-body">
                 <h2 id="animal-{{ animal.id }}">{{ animal.nome }}</h2>
@@ -51,7 +51,7 @@
                     <div><dt>Porte</dt><dd>{{ animal.porte }}</dd></div>
                     <div><dt>Sexo</dt><dd>{{ animal.sexo }}</dd></div>
                 </dl>
-                <p>{{ animal.descricao }}</p>
+                <p class="card-description">{{ animal.descricao }}</p>
                 <p class="card-district">{{ animal.distrito }}</p>
                 <a class="text-link" href="{{ url_for('animal_detalhes_publico', animal_id=animal.id) }}" aria-label="Ver detalhes de {{ animal.nome }}">Ver detalhes</a>
             </div>

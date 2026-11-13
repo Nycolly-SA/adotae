@@ -21,6 +21,7 @@
         <img class="detail-image" src="{{ url_for('static', filename='images/' ~ animal.imagem) }}" alt="{{ animal.imagem_alt }}" width="480" height="400">
         {% endif %}
         <div class="detail-content">
+            <div class="detail-summary">
             <p class="section-label">Conheça nosso amigo</p>
             <h1 id="nome-animal">{{ animal.nome }}</h1>
             <dl class="detail-facts">
@@ -31,11 +32,13 @@
                 <div class="detail-district"><dt>Distrito</dt><dd>{{ animal.distrito }}</dd></div>
                 {% if publico and animal.bairro %}<div class="detail-district"><dt>Bairro</dt><dd>{{ animal.bairro }}</dd></div>{% endif %}
             </dl>
-            <section aria-labelledby="sobre-animal">
+            </div>
+            <section class="detail-about" aria-labelledby="sobre-animal">
                 <h2 id="sobre-animal">Sobre {{ animal.nome }}</h2>
                 <p{% if publico %} class="detail-description"{% endif %}>{{ animal.descricao }}</p>
             </section>
-            <section class="detail-contact" aria-labelledby="titulo-contato">
+        </div>
+        <section class="detail-contact" aria-labelledby="titulo-contato">
                 {% if publico %}
                 <h2 id="titulo-contato">Contato</h2>
                 {% if animal.email_contato %}<p>E-mail: <a href="{{ animal.email_link }}">{{ animal.email_contato }}</a></p>{% endif %}
@@ -46,8 +49,7 @@
                 <p>Não há contatos disponíveis nesta demonstração.</p>
                 <p>Nos anúncios reais, esta seção exibe os contatos que a pessoa responsável pelo anúncio escolheu divulgar.</p>
                 {% endif %}
-            </section>
-        </div>
+        </section>
     </div>
     {% endif %}
 </article>

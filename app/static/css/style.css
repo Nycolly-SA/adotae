@@ -117,30 +117,32 @@ h1, h2 { font-family: var(--heading-font); font-weight: 400; letter-spacing: -.0
 .card-image img { aspect-ratio: 6 / 5; object-fit: cover; }
 .card-image-unavailable { aspect-ratio: 6 / 5; display: flex; align-items: center; justify-content: center; padding: 24px 24px 52px; background: var(--sage-light); color: var(--green); text-align: center; }
 .card-image-unavailable p { margin: 0; font-size: 14px; }
-.species-tag { position: absolute; bottom: 12px; left: 14px; padding: 3px 12px; background: var(--background); color: var(--green); border-radius: 20px; font-size: 12px; font-weight: 600; }
+.species-tag { position: absolute; bottom: 12px; left: 14px; max-width: calc(100% - 28px); overflow-wrap: anywhere; padding: 3px 12px; background: var(--background); color: var(--green); border-radius: 20px; font-size: 12px; font-weight: 600; }
 .card-body { padding: 21px; }
 .card-body h2 { font-size: 30px; margin-bottom: 16px; }
-.animal-facts { display: flex; gap: 24px; margin: 0 0 18px; font-size: 13px; }
-.animal-facts dt { color: var(--muted); font-size: 11px; }
+.animal-facts { display: flex; flex-wrap: wrap; gap: 12px 24px; margin: 0 0 18px; font-size: 1rem; }
+.animal-facts dt { color: var(--muted); font-size: .875rem; }
 .animal-facts dd { margin: 0; font-weight: 600; }
-.card-body p { font-size: 14px; color: var(--muted); margin-bottom: 0; }
-.card-body .card-district { margin-top: 16px; font-size: 12px; }
+.card-body p { font-size: 1rem; color: var(--muted); margin-bottom: 0; }
+.card-description { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; line-clamp: 4; overflow: hidden; overflow-wrap: anywhere; }
+.card-body .card-district { margin-top: 16px; font-size: .875rem; }
+.card-body .text-link { font-size: 1rem; }
 .catalog-closing { margin: 34px 0 0; text-align: center; color: var(--muted); font-size: 13px; }
 .animal-detail { padding-block: 40px 60px; }
 .detail-back { margin-bottom: 24px; }
-.detail-layout { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 48px; align-items: start; }
-.detail-image { border: 1px solid var(--border); border-radius: 14px; }
-.detail-content { min-width: 0; }
-.detail-content, .detail-facts dd { overflow-wrap: anywhere; }
+.detail-layout { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); grid-template-rows: auto 1fr; gap: 32px 48px; align-items: start; }
+.detail-image { grid-column: 1; grid-row: 1; border: 1px solid var(--border); border-radius: 14px; }
+.detail-content { grid-column: 2; grid-row: 1 / 3; min-width: 0; }
+.detail-content, .detail-facts dd, .detail-contact { overflow-wrap: anywhere; }
 .detail-description { white-space: pre-wrap; }
 .detail-content h1 { font-size: clamp(36px, 4vw, 52px); margin-bottom: 24px; }
-.detail-content h2 { font-size: 24px; margin-bottom: 16px; }
-.detail-content p { color: var(--muted); }
+.detail-content h2, .detail-contact h2 { font-size: 24px; margin-bottom: 16px; }
+.detail-content p, .detail-contact p { color: var(--muted); }
 .detail-facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px 24px; margin: 0 0 32px; }
-.detail-facts dt { color: var(--muted); font-size: 13px; }
+.detail-facts dt { color: var(--muted); font-size: .875rem; }
 .detail-facts dd { margin: 0; font-weight: 600; }
 .detail-district { grid-column: 1 / -1; }
-.detail-contact { margin-top: 32px; padding: 24px; background: var(--sage-light); border-radius: 8px; }
+.detail-contact { grid-column: 1; grid-row: 2; min-width: 0; padding: 24px; background: var(--sage-light); border-radius: 8px; }
 .detail-contact p:last-child { margin-bottom: 0; }
 .registration { padding-block: 48px; }
 .registration-card { max-width: 520px; margin-inline: auto; padding: clamp(20px, 4vw, 36px); background: var(--surface); border: 1px solid var(--border); border-radius: 14px; }
@@ -278,6 +280,11 @@ h1, h2 { font-family: var(--heading-font); font-weight: 400; letter-spacing: -.0
 }
 @media (max-width: 760px) {
     .detail-layout { grid-template-columns: 1fr; gap: 32px; }
+    .detail-content { display: contents; }
+    .detail-summary { grid-column: 1; grid-row: 2; }
+    .detail-facts { margin-bottom: 0; }
+    .detail-contact { grid-row: 3; }
+    .detail-about { grid-column: 1; grid-row: 4; }
     .hero { grid-template-columns: 1fr; gap: 34px; }
     .hero-copy { max-width: 560px; }
     .hero h1 { font-size: clamp(42px, 8vw, 58px); }

@@ -198,6 +198,30 @@ class RouteTests(unittest.TestCase):
                 self.assertEqual([option["value"] for option in page.selects[name]], values)
                 self.assertEqual([option["value"] for option in page.selects[name] if "selected" in option], [""])
 
+    def test_catalog_identifies_other_domestic_species(self):
+        self.rows[0].update(especie="Outro animal doméstico", especie_outro="Porquinho da índia")
+        response = self.client.get("/animais", query_string={"tipo": "Outro animal doméstico"})
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('<span class="species-tag">Porquinho da índia</span>', response.text)
+
+    def test_catalog_other_species_without_description_keeps_category(self):
+        self.rows[0].update(especie="Outro animal doméstico", especie_outro=None)
+        response = self.client.get("/animais")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('<span class="species-tag">Outro animal doméstico</span>', response.text)
+
+    def test_catalog_other_species_is_escaped(self):
+        self.rows[0].update(especie="Outro animal doméstico", especie_outro="<b>Cabra</b>")
+        response = self.client.get("/animais")
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('<span class="species-tag">&lt;b&gt;Cabra&lt;/b&gt;</span>', response.text)
+
+    def test_catalog_rejects_invalid_other_species(self):
+        for value in (42, [], " ", "x" * 61):
+            with self.subTest(value=value):
+                self.rows[0].update(especie="Outro animal doméstico", especie_outro=value)
+                self.assertEqual(self.client.get("/animais").status_code, 503)
+
     def test_catalog_has_no_links_to_demo_details_even_after_filtering(self):
         for query in ({}, {"tipo": "Gato"}, {"distrito": "Grussaí"}, {"porte": "Grande"}):
             with self.subTest(query=query):
@@ -347,7 +371,7 @@ class RouteTests(unittest.TestCase):
         html, _ = self.assert_catalog({}, ("Bento", "Luna", "Paçoca", "Amora"))
         call = self.catalog_calls()[-1]
         self.assertEqual(dict(call.url.params), dict(
-            select="id,nome,especie,sexo,idade_aproximada,porte,descricao,distrito,usuario_id",
+            select="id,nome,especie,sexo,idade_aproximada,porte,descricao,distrito,usuario_id,especie_outro",
             status_publicacao="eq.publicado", status_adocao="eq.disponivel",
             oculto_admin="eq.false", order="criado_em.desc"))
         self.assertEqual(call.headers["apikey"], "sb_publishable_test")

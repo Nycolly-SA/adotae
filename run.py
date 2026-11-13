@@ -806,7 +806,7 @@ def animais():
         # permite ler rascunhos, mas o catálogo deve ter sempre acesso anônimo.
         cliente = novo_cliente()
         consulta = (cliente.table("animais")
-                    .select("id,nome,especie,sexo,idade_aproximada,porte,descricao,distrito,usuario_id")
+                    .select("id,nome,especie,sexo,idade_aproximada,porte,descricao,distrito,usuario_id,especie_outro")
                     .eq("status_publicacao", "publicado")
                     .eq("status_adocao", "disponivel").eq("oculto_admin", False))
         for parametro, coluna in (("tipo", "especie"), ("porte", "porte"), ("distrito", "distrito")):
@@ -895,12 +895,18 @@ def validar_catalogo(registros):
         ):
             raise ValueError("Registro de catálogo inválido")
         UUID(registro["id"])
+        especie_outro = registro.get("especie_outro")
+        if especie_outro is not None and (not isinstance(especie_outro, str)
+                or not especie_outro.strip() or especie_outro != especie_outro.strip()
+                or len(especie_outro) > 60):
+            raise ValueError("Detalhe de espécie inválido")
         if (registro["especie"] not in OPCOES_FILTROS["tipo"]
                 or registro["porte"] not in OPCOES_FILTROS["porte"]
                 or registro["distrito"] not in OPCOES_FILTROS["distrito"]
                 or registro["sexo"] not in ("Macho", "Fêmea", "Não identificado")):
             raise ValueError("Opções de catálogo inválidas")
         animais.append({campo: registro[campo] for campo in limites})
+        animais[-1]["especie_outro"] = especie_outro
     return animais
 
 
