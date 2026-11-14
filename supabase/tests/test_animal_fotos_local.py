@@ -22,7 +22,10 @@ PSQL = shutil.which("psql") or str(PG_BIN / "psql.exe")
 A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
 B = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"
 LOCAL_ENV = {key: value for key, value in os.environ.items() if not key.upper().startswith("PG")}
-LOCAL_ENV.update(PGCLIENTENCODING="UTF8", PGCONNECT_TIMEOUT="5")
+# No Windows, traduções do psql/libpq podem usar a página ANSI e se misturar
+# às mensagens SQL em UTF-8 no stderr. Locale C só no filho evita essa mistura;
+# PGCLIENTENCODING preserva os acentos do SQL e encoding="utf-8" segue estrito.
+LOCAL_ENV.update(PGCLIENTENCODING="UTF8", PGCONNECT_TIMEOUT="5", LC_ALL="C", LANGUAGE="C")
 
 
 def literal(value):
@@ -200,6 +203,19 @@ class FotosSQLLocal(unittest.TestCase):
 
     def run_case(self, body, objeto=""):
         self.execute("begin;" + HELPERS + self.fixtures + objeto + body + "rollback;")
+
+    def test_psql_preserva_acentos_e_sqlstate(self):
+        mensagem = "Ação não permitida: Ç, ã, é"
+        self.assertEqual(self.execute(f"select {literal(mensagem)};"), mensagem)
+        sql = f"do $$ begin raise exception {literal(mensagem)} using errcode='42501'; end $$;"
+        with self.assertRaisesRegex(AssertionError, "42501: " + mensagem):
+            self.execute(sql)
+        # Exercitar também a leitura por threads de communicate() no Windows.
+        with subprocess.Popen(self.command(), stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE, encoding="utf-8", env=LOCAL_ENV) as process:
+            _, error = process.communicate(sql, timeout=10)
+        self.assertNotEqual(process.returncode, 0)
+        self.assertIn("42501: " + mensagem, error)
 
     def test_roteiro_rls_e_privilegios_preservados(self):
         self.execute((ROOT / "supabase/tests/animal_fotos_rls.sql").read_text(encoding="utf-8"))
